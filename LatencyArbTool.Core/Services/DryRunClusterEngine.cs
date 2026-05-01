@@ -17,9 +17,9 @@ public sealed class DryRunClusterEngine
     {
         var events = new List<DryRunEvent>();
 
-        if (snapshot.FeedAAgeMs > StrategyDefaults.FeedAStaleMs)
+        if (snapshot.FeedAIsStale)
         {
-            EnterEmergency(snapshot, events, "feed A stale");
+            EnterEmergency(snapshot, events, snapshot.HasValidFeedATimestamp ? "feed A stale" : "feed A invalid tick timestamp");
             return events;
         }
 
@@ -118,7 +118,7 @@ public sealed class DryRunClusterEngine
         }
 
         var holdMs = snapshot.NowMs - CurrentCluster.OpenedAtMs;
-        var emergencyClose = State == BotState.Emergency || snapshot.FeedAAgeMs > StrategyDefaults.FeedAStaleMs;
+        var emergencyClose = State == BotState.Emergency || snapshot.FeedAIsStale;
         var maxHoldClose = holdMs >= StrategyDefaults.MaxHoldMs;
 
         if (!emergencyClose && !maxHoldClose && holdMs < StrategyDefaults.MinHoldMs)
@@ -239,9 +239,9 @@ public sealed class DryRunClusterEngine
             return false;
         }
 
-        if (snapshot.FeedBAgeMs > StrategyDefaults.FeedBStaleMs)
+        if (snapshot.FeedBIsStale)
         {
-            events.Add(Block(snapshot, "feed B stale"));
+            events.Add(Block(snapshot, snapshot.HasValidFeedBTimestamp ? "feed B stale" : "feed B invalid tick timestamp"));
             return false;
         }
 
@@ -349,4 +349,3 @@ public sealed class DryRunClusterEngine
         return absGap <= StrategyDefaults.LotBandTwoMaxGap ? 7.0 : 5.0;
     }
 }
-

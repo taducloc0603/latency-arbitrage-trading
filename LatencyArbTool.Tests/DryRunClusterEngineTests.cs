@@ -5,6 +5,8 @@ namespace LatencyArbTool.Tests;
 
 public sealed class DryRunClusterEngineTests
 {
+    private const long BaseNowMs = 1_777_397_957_338;
+
     [Fact]
     public void Step_OpensBuyWhenConfirmed()
     {
@@ -163,8 +165,9 @@ public sealed class DryRunClusterEngineTests
         long tickAOffsetMs = 0,
         long tickBOffsetMs = 0)
     {
-        var a = new TickRecord(1, nowMs + tickAOffsetMs, bidA, askA, askA - bidA, nowMs, "XAUUSD");
-        var b = new TickRecord(1, nowMs + tickBOffsetMs, bidB, askB, spreadB, nowMs, "XAUUSD");
-        return new MarketSnapshot(a, b, nowMs, gapBuy, gapSell);
+        var effectiveNowMs = BaseNowMs + nowMs;
+        var a = new TickRecord(1, effectiveNowMs + tickAOffsetMs, bidA, askA, askA - bidA, effectiveNowMs + tickAOffsetMs, "XAUUSD");
+        var b = new TickRecord(1, effectiveNowMs + tickBOffsetMs, bidB, askB, spreadB, effectiveNowMs + tickBOffsetMs, "XAUUSD");
+        return new MarketSnapshot(a, b, effectiveNowMs, gapBuy, gapSell);
     }
 }

@@ -19,7 +19,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private CsvLogger? _csvLogger;
     private bool _isRunning;
     private bool _liveMode;
+    private bool _loggedInvalidTimestampA;
+    private bool _loggedInvalidTimestampB;
     private string _chartHwndText = string.Empty;
+    private string _tradeHwndText = string.Empty;
     private string _liveStatus = "Live mode off";
     private string _mapNameA = "FeedA";
     private string _mapNameB = "FeedB";
@@ -92,6 +95,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         set
         {
             if (SetProperty(ref _chartHwndText, value))
+            {
+                UpdateLiveStatus();
+            }
+        }
+    }
+
+    public string TradeHwndText
+    {
+        get => _tradeHwndText;
+        set
+        {
+            if (SetProperty(ref _tradeHwndText, value))
             {
                 UpdateLiveStatus();
             }
@@ -195,6 +210,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var events = _clusterEngine.Step(snapshot, thresholds, signal);
 
         UpdateMarketUi(snapshot, thresholds);
+        LogInvalidTimestampWarnings(snapshot);
         UpdateClusterUi();
         _csvLogger?.LogTick(snapshot, thresholds);
 
@@ -208,7 +224,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent)
     {
-        var result = _tradeExecutor.Execute(dryRunEvent, LiveMode, ChartHwndText);
+        var result = _tradeExecutor.Execute(dryRunEvent, LiveMode, ChartHwndText, TradeHwndText);
         if (!result.Attempted)
         {
             return;
@@ -230,13 +246,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         BidA = F(snapshot.A.Bid);
         AskA = F(snapshot.A.Ask);
         SpreadA = F(snapshot.A.Spread);
-        AgeA = $"{snapshot.FeedAAgeMs} ms";
+        AgeA = FormatAge(snapshot.FeedAAgeMs);
 
         SymbolB = snapshot.B.Symbol;
         BidB = F(snapshot.B.Bid);
         AskB = F(snapshot.B.Ask);
         SpreadB = F(snapshot.B.Spread);
-        AgeB = $"{snapshot.FeedBAgeMs} ms";
+        AgeB = FormatAge(snapshot.FeedBAgeMs);
 
         GapBuy = snapshot.GapBuy;
         GapSell = snapshot.GapSell;
@@ -256,6 +272,37 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         PeakTrough = cluster is null ? "-" : $"{F(cluster.PeakAskA)} / {F(cluster.TroughBidA)}";
     }
 
+    private void LogInvalidTimestampWarnings(MarketSnapshot snapshot)
+    {
+        if (!snapshot.HasValidFeedATimestamp && !_loggedInvalidTimestampA)
+        {
+            AddLog($"feed A invalid tick timestamp: timestampMs={snapshot.A.TimestampMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, source={snapshot.FeedAAge.Source}");
+            _loggedInvalidTimestampA = true;
+        }
+        else if (snapshot.HasValidFeedATimestamp)
+        {
+            if (_loggedInvalidTimestampA)
+            {
+                AddLog($"feed A tick age recovered: ageMs={snapshot.FeedAAgeMs}, source={snapshot.FeedAAge.Source}");
+            }
+            _loggedInvalidTimestampA = false;
+        }
+
+        if (!snapshot.HasValidFeedBTimestamp && !_loggedInvalidTimestampB)
+        {
+            AddLog($"feed B invalid tick timestamp: timestampMs={snapshot.B.TimestampMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, source={snapshot.FeedBAge.Source}");
+            _loggedInvalidTimestampB = true;
+        }
+        else if (snapshot.HasValidFeedBTimestamp)
+        {
+            if (_loggedInvalidTimestampB)
+            {
+                AddLog($"feed B tick age recovered: ageMs={snapshot.FeedBAgeMs}, source={snapshot.FeedBAge.Source}");
+            }
+            _loggedInvalidTimestampB = false;
+        }
+    }
+
     private void AddLog(string message)
     {
         Logs.Insert(0, $"{DateTime.Now:HH:mm:ss.fff} {message}");
@@ -273,14 +320,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        LiveStatus = HwndParser.TryParse(ChartHwndText, out var hwnd, out var error)
-            ? $"Live mode armed for HWND 0x{hwnd:X}"
-            : $"Live mode blocked: {error}";
+        var chartOk = HwndParser.TryParse(ChartHwndText, out var chartHwnd, out var chartError);
+        var tradeOk = HwndParser.TryParse(TradeHwndText, out var tradeHwnd, out var tradeError);
+
+        LiveStatus = (chartOk, tradeOk) switch
+        {
+            (true, true) => $"Live armed: chart 0x{chartHwnd:X}, trade 0x{tradeHwnd:X}",
+            (false, true) => $"Live blocked: chart {chartError}",
+            (true, false) => $"Live blocked: trade {tradeError}",
+            _ => $"Live blocked: chart {chartError}; trade {tradeError}"
+        };
     }
 
     private static string F(double value)
     {
         return value.ToString("0.#####", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatAge(long? ageMs)
+    {
+        return ageMs is null ? "unknown" : $"{ageMs.Value} ms";
     }
 
     public void Dispose()

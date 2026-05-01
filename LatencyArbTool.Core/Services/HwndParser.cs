@@ -16,6 +16,12 @@ public static class HwndParser
         }
 
         var value = text.Trim();
+        var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length > 1)
+        {
+            value = parts[^1];
+        }
+
         var isHex = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
         var number = isHex ? value[2..] : value;
         var style = isHex ? NumberStyles.AllowHexSpecifier : NumberStyles.Integer;
@@ -35,4 +41,3 @@ public static class HwndParser
         return true;
     }
 }
-

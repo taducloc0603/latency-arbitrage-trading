@@ -23,6 +23,18 @@ public sealed class HwndParserTests
     }
 
     [Theory]
+    [InlineData("chart 0x0003045A", 0x0003045AUL)]
+    [InlineData("trade 0x00050226", 0x00050226UL)]
+    [InlineData("chart 12345", 12345UL)]
+    public void TryParse_AcceptsLabelPrefix(string value, ulong expected)
+    {
+        var ok = HwndParser.TryParse(value, out var hwnd, out var error);
+
+        Assert.True(ok, error);
+        Assert.Equal(expected, hwnd);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("not-a-hwnd")]
     [InlineData("0")]
@@ -36,4 +48,3 @@ public sealed class HwndParserTests
         Assert.NotEmpty(error);
     }
 }
-

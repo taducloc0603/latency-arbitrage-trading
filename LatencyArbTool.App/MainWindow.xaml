@@ -37,12 +37,14 @@
                 <Button Content="Stop" Command="{Binding StopCommand}" />
                 <Button Content="Reset Dry-Run" Command="{Binding ResetCommand}" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal">
+            <WrapPanel>
                 <CheckBox Content="LiveMode" IsChecked="{Binding LiveMode}" Margin="0,0,16,0" VerticalAlignment="Center" />
-                <TextBlock Text="MT5 Chart HWND" Margin="0,0,8,0" />
-                <TextBox Text="{Binding ChartHwndText, UpdateSourceTrigger=PropertyChanged}" MinWidth="220" />
+                <TextBlock Text="Chart HWND" Margin="0,0,8,0" />
+                <TextBox Text="{Binding ChartHwndText, UpdateSourceTrigger=PropertyChanged}" MinWidth="180" />
+                <TextBlock Text="Trade HWND" Margin="0,0,8,0" />
+                <TextBox Text="{Binding TradeHwndText, UpdateSourceTrigger=PropertyChanged}" MinWidth="180" />
                 <TextBlock Text="{Binding LiveStatus}" FontWeight="SemiBold" />
-            </StackPanel>
+            </WrapPanel>
         </StackPanel>
 
         <Grid>

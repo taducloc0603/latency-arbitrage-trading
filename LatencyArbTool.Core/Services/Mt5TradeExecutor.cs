@@ -12,7 +12,11 @@ public sealed class Mt5TradeExecutor
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
     }
 
-    public LiveTradeResult Execute(DryRunEvent dryRunEvent, bool liveMode, string chartHwndText)
+    public LiveTradeResult Execute(
+        DryRunEvent dryRunEvent,
+        bool liveMode,
+        string chartHwndText,
+        string tradeHwndText)
     {
         if (!liveMode)
         {
@@ -24,30 +28,35 @@ public sealed class Mt5TradeExecutor
             return LiveTradeResult.Failed($"native unavailable: {availabilityError}");
         }
 
-        if (!HwndParser.TryParse(chartHwndText, out var chartHwnd, out var parseError))
-        {
-            return LiveTradeResult.Failed(parseError);
-        }
-
-        if (!_gateway.IsValidWindow(chartHwnd, out var validWindowError))
-        {
-            return LiveTradeResult.Failed($"invalid HWND: {validWindowError}");
-        }
-
         return dryRunEvent.Decision switch
         {
             "dry open" when dryRunEvent.Side == DryRunSide.BuyB =>
-                ExecuteClick("click buy", chartHwnd, _gateway.ClickBuy),
+                ExecuteOpen("click buy", chartHwndText, _gateway.ClickBuy),
             "dry open" when dryRunEvent.Side == DryRunSide.SellB =>
-                ExecuteClick("click sell", chartHwnd, _gateway.ClickSell),
-            "dry close" => ExecuteCloseRowZero(chartHwnd),
+                ExecuteOpen("click sell", chartHwndText, _gateway.ClickSell),
+            "dry close" => ExecuteCloseRowZero(tradeHwndText),
             _ => LiveTradeResult.Skipped($"ignored event {dryRunEvent.Decision}")
         };
     }
 
-    private LiveTradeResult ExecuteCloseRowZero(ulong parentHwnd)
+    private LiveTradeResult ExecuteOpen(string action, string chartHwndText, HwndAction execute)
     {
-        if (!_gateway.EnsureContextFromParent(parentHwnd, out var contextError))
+        if (!TryParseAndValidate(chartHwndText, "chart", out var chartHwnd, out var error))
+        {
+            return LiveTradeResult.Failed(error);
+        }
+
+        return ExecuteClick(action, chartHwnd, execute);
+    }
+
+    private LiveTradeResult ExecuteCloseRowZero(string tradeHwndText)
+    {
+        if (!TryParseAndValidate(tradeHwndText, "trade", out var tradeHwnd, out var error))
+        {
+            return LiveTradeResult.Failed(error);
+        }
+
+        if (!_gateway.EnsureContextFromParent(tradeHwnd, out var contextError))
         {
             return LiveTradeResult.Failed($"close row 0 context failed: {contextError}");
         }
@@ -55,6 +64,24 @@ public sealed class Mt5TradeExecutor
         return _gateway.ClosePositionMt5(0, out var closeError)
             ? LiveTradeResult.Executed("close MT5 row 0")
             : LiveTradeResult.Failed($"close row 0 failed: {closeError}");
+    }
+
+    private bool TryParseAndValidate(string hwndText, string label, out ulong hwnd, out string error)
+    {
+        if (!HwndParser.TryParse(hwndText, out hwnd, out var parseError))
+        {
+            error = $"{label} HWND invalid: {parseError}";
+            return false;
+        }
+
+        if (!_gateway.IsValidWindow(hwnd, out var validWindowError))
+        {
+            error = $"{label} HWND invalid: {validWindowError}";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 
     private static LiveTradeResult ExecuteClick(

@@ -11,7 +11,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: false, "123");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: false, "123", "456");
 
         Assert.False(result.Attempted);
         Assert.Equal(0, gateway.BuyCalls);
@@ -23,7 +23,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "0");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "0", "456");
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -36,11 +36,12 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "0x3039");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226");
 
         Assert.True(result.Success);
         Assert.Equal(1, gateway.BuyCalls);
         Assert.Equal(0, gateway.SellCalls);
+        Assert.Equal(0x3039UL, gateway.LastBuyHwnd);
     }
 
     [Fact]
@@ -49,11 +50,12 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.SellB), liveMode: true, "12345");
+        var result = executor.Execute(Event("dry open", DryRunSide.SellB), liveMode: true, "chart 12345", "trade 0x50226");
 
         Assert.True(result.Success);
         Assert.Equal(0, gateway.BuyCalls);
         Assert.Equal(1, gateway.SellCalls);
+        Assert.Equal(12345UL, gateway.LastSellHwnd);
     }
 
     [Fact]
@@ -62,10 +64,11 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "12345");
+        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226");
 
         Assert.True(result.Success);
         Assert.Equal(1, gateway.EnsureContextCalls);
+        Assert.Equal(0x50226UL, gateway.LastContextHwnd);
         Assert.Equal(0, gateway.ClosedRow);
     }
 
@@ -75,7 +78,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway { Available = false };
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345", "456");
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -93,6 +96,9 @@ public sealed class Mt5TradeExecutorTests
         public int BuyCalls { get; private set; }
         public int SellCalls { get; private set; }
         public int EnsureContextCalls { get; private set; }
+        public ulong? LastBuyHwnd { get; private set; }
+        public ulong? LastSellHwnd { get; private set; }
+        public ulong? LastContextHwnd { get; private set; }
         public int? ClosedRow { get; private set; }
 
         public bool IsAvailable(out string error)
@@ -111,6 +117,7 @@ public sealed class Mt5TradeExecutorTests
         {
             error = string.Empty;
             BuyCalls++;
+            LastBuyHwnd = chartHwnd;
             return true;
         }
 
@@ -118,6 +125,7 @@ public sealed class Mt5TradeExecutorTests
         {
             error = string.Empty;
             SellCalls++;
+            LastSellHwnd = chartHwnd;
             return true;
         }
 
@@ -125,6 +133,7 @@ public sealed class Mt5TradeExecutorTests
         {
             error = string.Empty;
             EnsureContextCalls++;
+            LastContextHwnd = parentHwnd;
             return true;
         }
 
@@ -136,4 +145,3 @@ public sealed class Mt5TradeExecutorTests
         }
     }
 }
-
