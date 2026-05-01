@@ -1,0 +1,117 @@
+﻿<Window x:Class="LatencyArbTool.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Latency Arb Dry-Run" Height="760" Width="1100"
+        MinHeight="640" MinWidth="980">
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="MinWidth" Value="190" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="12,6" />
+        </Style>
+        <Style x:Key="ValueText" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,16">
+            <TextBlock Text="Map A" Margin="0,0,8,0" />
+            <TextBox Text="{Binding MapNameA, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="Map B" Margin="0,0,8,0" />
+            <TextBox Text="{Binding MapNameB, UpdateSourceTrigger=PropertyChanged}" />
+            <Button Content="Check Maps" Command="{Binding CheckMapsCommand}" />
+            <Button Content="Start" Command="{Binding StartCommand}" />
+            <Button Content="Stop" Command="{Binding StopCommand}" />
+            <Button Content="Reset Dry-Run" Command="{Binding ResetCommand}" />
+        </StackPanel>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="3*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <GroupBox Header="Feed A" Grid.Column="0" Margin="0,0,12,12">
+                <UniformGrid Columns="2" Margin="12">
+                    <TextBlock Text="Status" />
+                    <TextBlock Text="{Binding StatusA}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Symbol" />
+                    <TextBlock Text="{Binding SymbolA}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Bid" />
+                    <TextBlock Text="{Binding BidA}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Ask" />
+                    <TextBlock Text="{Binding AskA}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Spread" />
+                    <TextBlock Text="{Binding SpreadA}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Tick age" />
+                    <TextBlock Text="{Binding AgeA}" Style="{StaticResource ValueText}" />
+                </UniformGrid>
+            </GroupBox>
+
+            <GroupBox Header="Feed B" Grid.Column="1" Margin="0,0,12,12">
+                <UniformGrid Columns="2" Margin="12">
+                    <TextBlock Text="Status" />
+                    <TextBlock Text="{Binding StatusB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Symbol" />
+                    <TextBlock Text="{Binding SymbolB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Bid" />
+                    <TextBlock Text="{Binding BidB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Ask" />
+                    <TextBlock Text="{Binding AskB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Spread" />
+                    <TextBlock Text="{Binding SpreadB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Tick age" />
+                    <TextBlock Text="{Binding AgeB}" Style="{StaticResource ValueText}" />
+                </UniformGrid>
+            </GroupBox>
+
+            <GroupBox Header="Strategy" Grid.Column="2" Margin="0,0,0,12">
+                <UniformGrid Columns="2" Margin="12">
+                    <TextBlock Text="GapBuy" />
+                    <TextBlock Text="{Binding GapBuy}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="GapSell" />
+                    <TextBlock Text="{Binding GapSell}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="OpenBuyThreshold" />
+                    <TextBlock Text="{Binding OpenBuyThreshold}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="OpenSellThreshold" />
+                    <TextBlock Text="{Binding OpenSellThreshold}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Rolling samples" />
+                    <TextBlock Text="{Binding SampleCount}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Threshold mode" />
+                    <TextBlock Text="{Binding ThresholdMode}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Bot state" />
+                    <TextBlock Text="{Binding BotState}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Cluster side" />
+                    <TextBlock Text="{Binding ClusterSide}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Order count" />
+                    <TextBlock Text="{Binding OrderCount}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Floating PnL" />
+                    <TextBlock Text="{Binding FloatingPnl}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Peak / trough" />
+                    <TextBlock Text="{Binding PeakTrough}" Style="{StaticResource ValueText}" />
+                </UniformGrid>
+            </GroupBox>
+
+            <GroupBox Header="Event Log" Grid.Row="1" Grid.ColumnSpan="3">
+                <ListBox ItemsSource="{Binding Logs}" FontFamily="Consolas" FontSize="12" />
+            </GroupBox>
+        </Grid>
+    </DockPanel>
+</Window>
