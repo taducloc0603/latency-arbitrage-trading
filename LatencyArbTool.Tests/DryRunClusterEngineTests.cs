@@ -16,7 +16,7 @@ public sealed class DryRunClusterEngineTests
 
         Assert.Equal(BotState.Holding, engine.State);
         Assert.Equal(DryRunSide.BuyB, engine.CurrentCluster?.Side);
-        Assert.Equal("dry open", Assert.Single(events).Decision);
+        Assert.Equal("live open", Assert.Single(events).Decision);
         Assert.Equal(101, engine.CurrentCluster?.Orders.Single().OpenPrice);
     }
 
@@ -149,7 +149,7 @@ public sealed class DryRunClusterEngineTests
 
         Assert.Equal(BotState.Holding, engine.State);
         Assert.Equal(DryRunSide.BuyB, engine.CurrentCluster?.Side);
-        Assert.Equal("dry open", Assert.Single(events).Decision);
+        Assert.Equal("live open", Assert.Single(events).Decision);
     }
 
     [Fact]

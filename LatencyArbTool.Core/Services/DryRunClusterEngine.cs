@@ -79,7 +79,7 @@ public sealed class DryRunClusterEngine
 
         CurrentCluster = cluster;
         State = BotState.Holding;
-        AddOrder(snapshot, price, "dry open", "confirmed signal", events);
+        AddOrder(snapshot, price, "live open", "confirmed signal", events);
     }
 
     private void TryStack(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events)
@@ -102,11 +102,11 @@ public sealed class DryRunClusterEngine
 
         if (CurrentCluster.Side == DryRunSide.BuyB && snapshot.GapBuy <= thresholds.OpenBuy)
         {
-            AddOrder(snapshot, snapshot.B.Ask, "dry stack", "buy gap still extreme", events);
+            AddOrder(snapshot, snapshot.B.Ask, "live stack", "buy gap still extreme", events);
         }
         else if (CurrentCluster.Side == DryRunSide.SellB && snapshot.GapSell >= thresholds.OpenSell)
         {
-            AddOrder(snapshot, snapshot.B.Bid, "dry stack", "sell gap still extreme", events);
+            AddOrder(snapshot, snapshot.B.Bid, "live stack", "sell gap still extreme", events);
         }
     }
 
@@ -180,7 +180,7 @@ public sealed class DryRunClusterEngine
         cluster.RealizedPnlRaw = pnl;
 
         events.Add(new DryRunEvent(
-            "dry close",
+            "live close",
             reason,
             State,
             snapshot.NowMs,

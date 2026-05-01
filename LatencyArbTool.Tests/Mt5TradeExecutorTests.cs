@@ -6,24 +6,12 @@ namespace LatencyArbTool.Tests;
 public sealed class Mt5TradeExecutorTests
 {
     [Fact]
-    public void Execute_LiveDisabledDoesNotCallNative()
-    {
-        var gateway = new FakeGateway();
-        var executor = new Mt5TradeExecutor(gateway);
-
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: false, "123", "456");
-
-        Assert.False(result.Attempted);
-        Assert.Equal(0, gateway.BuyCalls);
-    }
-
-    [Fact]
     public void Execute_InvalidHwndDoesNotCallNative()
     {
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "0", "456", EmptyTrades());
+        var result = executor.Execute(Event("live open", DryRunSide.BuyB), "0", "456", EmptyTrades());
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -31,12 +19,12 @@ public sealed class Mt5TradeExecutorTests
     }
 
     [Fact]
-    public void Execute_DryOpenBuyClicksBuy()
+    public void Execute_LiveOpenBuyClicksBuy()
     {
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226", EmptyTrades());
+        var result = executor.Execute(Event("live open", DryRunSide.BuyB), "chart 0x3039", "trade 0x50226", EmptyTrades());
 
         Assert.True(result.Success);
         Assert.Equal(1, gateway.BuyCalls);
@@ -45,12 +33,12 @@ public sealed class Mt5TradeExecutorTests
     }
 
     [Fact]
-    public void Execute_DryOpenSellClicksSell()
+    public void Execute_LiveOpenSellClicksSell()
     {
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.SellB), liveMode: true, "chart 12345", "trade 0x50226", EmptyTrades());
+        var result = executor.Execute(Event("live open", DryRunSide.SellB), "chart 12345", "trade 0x50226", EmptyTrades());
 
         Assert.True(result.Success);
         Assert.Equal(0, gateway.BuyCalls);
@@ -59,12 +47,12 @@ public sealed class Mt5TradeExecutorTests
     }
 
     [Fact]
-    public void Execute_DryCloseClosesRowZero()
+    public void Execute_LiveCloseClosesRowZero()
     {
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226", OneTrade(TradeSide.Buy));
+        var result = executor.Execute(Event("live close", DryRunSide.BuyB), "chart 0x3039", "trade 0x50226", OneTrade(TradeSide.Buy));
 
         Assert.True(result.Success);
         Assert.Equal(1, gateway.EnsureContextCalls);
@@ -78,7 +66,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway { Available = false };
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345", "456", EmptyTrades());
+        var result = executor.Execute(Event("live open", DryRunSide.BuyB), "12345", "456", EmptyTrades());
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -91,7 +79,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345", "456", OneTrade(TradeSide.Buy));
+        var result = executor.Execute(Event("live open", DryRunSide.BuyB), "12345", "456", OneTrade(TradeSide.Buy));
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -105,7 +93,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "12345", "456", EmptyTrades());
+        var result = executor.Execute(Event("live close", DryRunSide.BuyB), "12345", "456", EmptyTrades());
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -119,7 +107,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "12345", "456", OneTrade(TradeSide.Sell));
+        var result = executor.Execute(Event("live close", DryRunSide.BuyB), "12345", "456", OneTrade(TradeSide.Sell));
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);

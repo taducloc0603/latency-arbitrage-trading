@@ -59,7 +59,7 @@ public sealed class CsvLogger : IDisposable
             thresholds.OpenBuy,
             thresholds.OpenSell));
 
-        if (dryRunEvent.Decision.StartsWith("dry ", StringComparison.OrdinalIgnoreCase))
+        if (dryRunEvent.Decision.StartsWith("live ", StringComparison.OrdinalIgnoreCase))
         {
             _clusters.WriteLine(string.Join(',',
                 dryRunEvent.ClusterId,

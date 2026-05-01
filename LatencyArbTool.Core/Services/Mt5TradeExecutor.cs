@@ -14,16 +14,10 @@ public sealed class Mt5TradeExecutor
 
     public LiveTradeResult Execute(
         DryRunEvent dryRunEvent,
-        bool liveMode,
         string chartHwndText,
         string tradeHwndText,
         TradeReadResult? bTrades = null)
     {
-        if (!liveMode)
-        {
-            return LiveTradeResult.Skipped("live mode disabled");
-        }
-
         var safety = ValidateBTradeState(dryRunEvent, bTrades);
         if (safety is not null)
         {
@@ -37,18 +31,18 @@ public sealed class Mt5TradeExecutor
 
         return dryRunEvent.Decision switch
         {
-            "dry open" when dryRunEvent.Side == DryRunSide.BuyB =>
+            "live open" when dryRunEvent.Side == DryRunSide.BuyB =>
                 ExecuteOpen("click buy", chartHwndText, _gateway.ClickBuy),
-            "dry open" when dryRunEvent.Side == DryRunSide.SellB =>
+            "live open" when dryRunEvent.Side == DryRunSide.SellB =>
                 ExecuteOpen("click sell", chartHwndText, _gateway.ClickSell),
-            "dry close" => ExecuteCloseRowZero(tradeHwndText),
+            "live close" => ExecuteCloseRowZero(tradeHwndText),
             _ => LiveTradeResult.Skipped($"ignored event {dryRunEvent.Decision}")
         };
     }
 
     private static LiveTradeResult? ValidateBTradeState(DryRunEvent dryRunEvent, TradeReadResult? bTrades)
     {
-        if (dryRunEvent.Decision is not ("dry open" or "dry close"))
+        if (dryRunEvent.Decision is not ("live open" or "live close"))
         {
             return null;
         }
@@ -63,7 +57,7 @@ public sealed class Mt5TradeExecutor
             return LiveTradeResult.Failed($"B trade state unavailable: {bTrades.Error}");
         }
 
-        if (dryRunEvent.Decision == "dry open")
+        if (dryRunEvent.Decision == "live open")
         {
             return bTrades.Count == 0
                 ? null
@@ -85,7 +79,7 @@ public sealed class Mt5TradeExecutor
 
         if (expectedSide is null)
         {
-            return LiveTradeResult.Failed("dry close side missing");
+            return LiveTradeResult.Failed("live close side missing");
         }
 
         return rowZero.Side == expectedSide.Value

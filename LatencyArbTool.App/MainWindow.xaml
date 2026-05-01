@@ -4,7 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Latency Arb Dry-Run" Height="760" Width="1100"
+        Title="Latency Arb Live" Height="760" Width="1100"
         MinHeight="640" MinWidth="980">
     <Window.Resources>
         <Style TargetType="TextBlock">
@@ -35,10 +35,9 @@
                 <Button Content="Check Maps" Command="{Binding CheckMapsCommand}" />
                 <Button Content="Start" Command="{Binding StartCommand}" />
                 <Button Content="Stop" Command="{Binding StopCommand}" />
-                <Button Content="Reset Dry-Run" Command="{Binding ResetCommand}" />
+                <Button Content="Reset Live State" Command="{Binding ResetCommand}" />
             </StackPanel>
             <WrapPanel>
-                <CheckBox Content="LiveMode" IsChecked="{Binding LiveMode}" Margin="0,0,16,0" VerticalAlignment="Center" />
                 <TextBlock Text="Chart HWND" Margin="0,0,8,0" />
                 <TextBox Text="{Binding ChartHwndText, UpdateSourceTrigger=PropertyChanged}" MinWidth="180" />
                 <TextBlock Text="Trade HWND" Margin="0,0,8,0" />

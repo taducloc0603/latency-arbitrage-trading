@@ -1,4 +1,4 @@
-# Latency Arb Dry-Run
+# Latency Arb Live
 
 Tai lieu nay ghi lai cac thong so va dieu kien dong/mo lenh hien tai cua tool.
 
@@ -43,7 +43,7 @@ Tool chi mo lenh moi khi:
 - Feed B khong stale.
 - Spread B khong bat thuong.
 - Tin hieu duoc xac nhan lien tuc toi thieu `1000ms`.
-- Khi `LiveMode` bat, B trade map phai doc duoc va khong co lenh B dang mo; neu khong verify duoc thi live open bi chan.
+- B trade map phai doc duoc va khong co lenh B dang mo; neu khong verify duoc thi live open bi chan.
 
 Mo `BuyB` khi:
 
@@ -72,7 +72,7 @@ Dong `BuyB` khi mot trong cac dieu kien sau dung:
 - Da giu toi thieu `5000ms` va `GapBuy >= -15`: dong tai `B.Bid`.
 - Da giu `>= 90000ms`: dong tai `B.Bid`.
 
-Khi `LiveMode` bat, live close chi duoc gui neu B trade map doc duoc, co it nhat mot lenh dang mo o row 0, va side cua row 0 khop voi side dry-run can dong.
+Live close chi duoc gui neu B trade map doc duoc, co it nhat mot lenh dang mo o row 0, va side cua row 0 khop voi side strategy can dong.
 
 Dong `SellB` khi mot trong cac dieu kien sau dung:
 

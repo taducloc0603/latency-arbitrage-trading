@@ -20,7 +20,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
     private bool _isRunning;
-    private bool _liveMode;
     private bool _loggedInvalidLatencyA;
     private bool _loggedInvalidLatencyB;
     private bool _loggedBTradeDisconnected;
@@ -28,7 +27,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private long _nextBPositionReadTickCountMs;
     private string _chartHwndText = string.Empty;
     private string _tradeHwndText = string.Empty;
-    private string _liveStatus = "Live mode off";
+    private string _liveStatus = "Live mode on; waiting for valid HWND";
     private string _mapNameA = @"Local\MT_A_Tick";
     private string _mapNameB = @"Local\MT_B_Tick";
     private string _statusA = "Disconnected";
@@ -68,7 +67,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         CheckMapsCommand = new RelayCommand(CheckMaps);
         StartCommand = new RelayCommand(Start, () => !IsRunning);
         StopCommand = new RelayCommand(Stop, () => IsRunning);
-        ResetCommand = new RelayCommand(ResetDryRun);
+        ResetCommand = new RelayCommand(ResetLiveState);
     }
 
     public string MapNameA
@@ -93,21 +92,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string MapNameBTrade => SharedMemoryMapNames.TradeFromTick(MapNameB);
 
     public string MapNameBHistory => SharedMemoryMapNames.HistoryFromTick(MapNameB);
-
-    public bool LiveMode
-    {
-        get => _liveMode;
-        set
-        {
-            if (SetProperty(ref _liveMode, value))
-            {
-                LiveStatus = value ? "Live mode armed; waiting for valid HWND" : "Live mode off";
-                AddLog(value
-                    ? "live mode armed: MT5 actions may be sent when HWND is valid"
-                    : "live mode disabled");
-            }
-        }
-    }
 
     public string ChartHwndText
     {
@@ -195,7 +179,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _csvLogger = new CsvLogger(AppContext.BaseDirectory);
         IsRunning = true;
         _timer.Start();
-        AddLog("start dry-run");
+        UpdateLiveStatus();
+        AddLog("start live mode");
     }
 
     private void Stop()
@@ -203,15 +188,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _timer.Stop();
         _csvLogger?.Flush();
         IsRunning = false;
-        AddLog("stop dry-run");
+        AddLog("stop live mode");
     }
 
-    private void ResetDryRun()
+    private void ResetLiveState()
     {
         _signalEngine.Reset();
         _clusterEngine.Reset();
         UpdateClusterUi();
-        AddLog("reset dry-run");
+        AddLog("reset live state");
     }
 
     private void Poll()
@@ -258,7 +243,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         UpdateBTradeUi(bTrades, logTransitions: true);
         UpdateBHistoryUi(bHistory, logTransitions: true);
 
-        var result = _tradeExecutor.Execute(dryRunEvent, LiveMode, ChartHwndText, TradeHwndText, bTrades);
+        var result = _tradeExecutor.Execute(dryRunEvent, ChartHwndText, TradeHwndText, bTrades);
         if (!result.Attempted)
         {
             return;
@@ -273,9 +258,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             AddLog($"live audit: {FormatTradeAudit(bTrades)}; {FormatHistoryAudit(bHistory)}");
         }
 
-        if (dryRunEvent.Decision == "dry close")
+        if (dryRunEvent.Decision == "live close")
         {
-            AddLog("live warning: dry close maps to MT5 row 0");
+            AddLog("live warning: close maps to MT5 row 0");
         }
     }
 
@@ -409,12 +394,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateLiveStatus()
     {
-        if (!LiveMode)
-        {
-            LiveStatus = "Live mode off";
-            return;
-        }
-
         var chartOk = HwndParser.TryParse(ChartHwndText, out var chartHwnd, out var chartError);
         var tradeOk = HwndParser.TryParse(TradeHwndText, out var tradeHwnd, out var tradeError);
 
