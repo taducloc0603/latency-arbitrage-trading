@@ -70,8 +70,8 @@
                     <TextBlock Text="{Binding AskA}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Spread" />
                     <TextBlock Text="{Binding SpreadA}" Style="{StaticResource ValueText}" />
-                    <TextBlock Text="Tick age" />
-                    <TextBlock Text="{Binding AgeA}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Latency" />
+                    <TextBlock Text="{Binding LatencyA}" Style="{StaticResource ValueText}" />
                 </UniformGrid>
             </GroupBox>
 
@@ -87,8 +87,8 @@
                     <TextBlock Text="{Binding AskB}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Spread" />
                     <TextBlock Text="{Binding SpreadB}" Style="{StaticResource ValueText}" />
-                    <TextBlock Text="Tick age" />
-                    <TextBlock Text="{Binding AgeB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Latency" />
+                    <TextBlock Text="{Binding LatencyB}" Style="{StaticResource ValueText}" />
                 </UniformGrid>
             </GroupBox>
 

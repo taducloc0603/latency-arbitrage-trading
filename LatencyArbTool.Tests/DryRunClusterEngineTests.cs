@@ -138,6 +138,21 @@ public sealed class DryRunClusterEngineTests
     }
 
     [Fact]
+    public void Step_OpensWhenSymbolsDiffer()
+    {
+        var engine = new DryRunClusterEngine();
+
+        var events = engine.Step(
+            Snapshot(0, gapBuy: -80, gapSell: 0, symbolA: "XAUUSD.lmx", symbolB: "XAUUSD.s"),
+            Thresholds(),
+            SignalSide.BuyB);
+
+        Assert.Equal(BotState.Holding, engine.State);
+        Assert.Equal(DryRunSide.BuyB, engine.CurrentCluster?.Side);
+        Assert.Equal("dry open", Assert.Single(events).Decision);
+    }
+
+    [Fact]
     public void Step_AbnormalSpreadBlocksOpen()
     {
         var engine = new DryRunClusterEngine();
@@ -163,11 +178,13 @@ public sealed class DryRunClusterEngineTests
         double askB = 101,
         double spreadB = 1,
         long tickAOffsetMs = 0,
-        long tickBOffsetMs = 0)
+        long tickBOffsetMs = 0,
+        string symbolA = "XAUUSD",
+        string symbolB = "XAUUSD")
     {
         var effectiveNowMs = BaseNowMs + nowMs;
-        var a = new TickRecord(1, effectiveNowMs + tickAOffsetMs, bidA, askA, askA - bidA, effectiveNowMs + tickAOffsetMs, "XAUUSD");
-        var b = new TickRecord(1, effectiveNowMs + tickBOffsetMs, bidB, askB, spreadB, effectiveNowMs + tickBOffsetMs, "XAUUSD");
+        var a = new TickRecord(1, effectiveNowMs + tickAOffsetMs, bidA, askA, askA - bidA, effectiveNowMs + tickAOffsetMs, symbolA);
+        var b = new TickRecord(1, effectiveNowMs + tickBOffsetMs, bidB, askB, spreadB, effectiveNowMs + tickBOffsetMs, symbolB);
         return new MarketSnapshot(a, b, effectiveNowMs, gapBuy, gapSell);
     }
 }

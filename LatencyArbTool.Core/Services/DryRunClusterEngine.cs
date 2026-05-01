@@ -233,12 +233,6 @@ public sealed class DryRunClusterEngine
 
     private bool CanOpenOrStack(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events)
     {
-        if (!string.Equals(snapshot.A.Symbol, snapshot.B.Symbol, StringComparison.OrdinalIgnoreCase))
-        {
-            events.Add(Block(snapshot, "symbol mismatch"));
-            return false;
-        }
-
         if (snapshot.FeedBIsStale)
         {
             events.Add(Block(snapshot, snapshot.HasValidFeedBTimestamp ? "feed B stale" : "feed B invalid tick timestamp"));
@@ -289,7 +283,7 @@ public sealed class DryRunClusterEngine
             return;
         }
 
-        _healthyATickCount = snapshot.FeedAAgeMs <= 1000 ? _healthyATickCount + 1 : 0;
+        _healthyATickCount = snapshot.FeedALatencyMs <= 1000 ? _healthyATickCount + 1 : 0;
         if (_healthyATickCount >= 10)
         {
             State = BotState.Idle;

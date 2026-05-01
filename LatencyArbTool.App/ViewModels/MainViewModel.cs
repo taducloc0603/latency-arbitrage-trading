@@ -24,8 +24,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _chartHwndText = string.Empty;
     private string _tradeHwndText = string.Empty;
     private string _liveStatus = "Live mode off";
-    private string _mapNameA = "FeedA";
-    private string _mapNameB = "FeedB";
+    private string _mapNameA = @"Local\MT_A_Tick";
+    private string _mapNameB = @"Local\MT_B_Tick";
     private string _statusA = "Disconnected";
     private string _statusB = "Disconnected";
     private string _symbolA = "-";
@@ -33,11 +33,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _bidA = "-";
     private string _askA = "-";
     private string _spreadA = "-";
-    private string _ageA = "-";
+    private string _latencyA = "-";
     private string _bidB = "-";
     private string _askB = "-";
     private string _spreadB = "-";
-    private string _ageB = "-";
+    private string _latencyB = "-";
     private int _gapBuy;
     private int _gapSell;
     private int _openBuyThreshold = StrategyDefaults.FixedOpenBuyFallback;
@@ -133,11 +133,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string BidA { get => _bidA; private set => SetProperty(ref _bidA, value); }
     public string AskA { get => _askA; private set => SetProperty(ref _askA, value); }
     public string SpreadA { get => _spreadA; private set => SetProperty(ref _spreadA, value); }
-    public string AgeA { get => _ageA; private set => SetProperty(ref _ageA, value); }
+    public string LatencyA { get => _latencyA; private set => SetProperty(ref _latencyA, value); }
     public string BidB { get => _bidB; private set => SetProperty(ref _bidB, value); }
     public string AskB { get => _askB; private set => SetProperty(ref _askB, value); }
     public string SpreadB { get => _spreadB; private set => SetProperty(ref _spreadB, value); }
-    public string AgeB { get => _ageB; private set => SetProperty(ref _ageB, value); }
+    public string LatencyB { get => _latencyB; private set => SetProperty(ref _latencyB, value); }
     public int GapBuy { get => _gapBuy; private set => SetProperty(ref _gapBuy, value); }
     public int GapSell { get => _gapSell; private set => SetProperty(ref _gapSell, value); }
     public int OpenBuyThreshold { get => _openBuyThreshold; private set => SetProperty(ref _openBuyThreshold, value); }
@@ -246,13 +246,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         BidA = F(snapshot.A.Bid);
         AskA = F(snapshot.A.Ask);
         SpreadA = F(snapshot.A.Spread);
-        AgeA = FormatAge(snapshot.FeedAAgeMs);
+        LatencyA = FormatLatency(snapshot.FeedALatencyMs);
 
         SymbolB = snapshot.B.Symbol;
         BidB = F(snapshot.B.Bid);
         AskB = F(snapshot.B.Ask);
         SpreadB = F(snapshot.B.Spread);
-        AgeB = FormatAge(snapshot.FeedBAgeMs);
+        LatencyB = FormatLatency(snapshot.FeedBLatencyMs);
 
         GapBuy = snapshot.GapBuy;
         GapSell = snapshot.GapSell;
@@ -276,28 +276,28 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         if (!snapshot.HasValidFeedATimestamp && !_loggedInvalidTimestampA)
         {
-            AddLog($"feed A invalid tick timestamp: timestampMs={snapshot.A.TimestampMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, source={snapshot.FeedAAge.Source}");
+            AddLog($"feed A invalid tick timestamp: timestampMs={snapshot.A.TimestampMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, source={snapshot.FeedALatency.Source}");
             _loggedInvalidTimestampA = true;
         }
         else if (snapshot.HasValidFeedATimestamp)
         {
             if (_loggedInvalidTimestampA)
             {
-                AddLog($"feed A tick age recovered: ageMs={snapshot.FeedAAgeMs}, source={snapshot.FeedAAge.Source}");
+                AddLog($"feed A latency recovered: latencyMs={snapshot.FeedALatencyMs}, source={snapshot.FeedALatency.Source}");
             }
             _loggedInvalidTimestampA = false;
         }
 
         if (!snapshot.HasValidFeedBTimestamp && !_loggedInvalidTimestampB)
         {
-            AddLog($"feed B invalid tick timestamp: timestampMs={snapshot.B.TimestampMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, source={snapshot.FeedBAge.Source}");
+            AddLog($"feed B invalid tick timestamp: timestampMs={snapshot.B.TimestampMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, source={snapshot.FeedBLatency.Source}");
             _loggedInvalidTimestampB = true;
         }
         else if (snapshot.HasValidFeedBTimestamp)
         {
             if (_loggedInvalidTimestampB)
             {
-                AddLog($"feed B tick age recovered: ageMs={snapshot.FeedBAgeMs}, source={snapshot.FeedBAge.Source}");
+                AddLog($"feed B latency recovered: latencyMs={snapshot.FeedBLatencyMs}, source={snapshot.FeedBLatency.Source}");
             }
             _loggedInvalidTimestampB = false;
         }
@@ -337,9 +337,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return value.ToString("0.#####", CultureInfo.InvariantCulture);
     }
 
-    private static string FormatAge(long? ageMs)
+    private static string FormatLatency(long? latencyMs)
     {
-        return ageMs is null ? "unknown" : $"{ageMs.Value} ms";
+        return latencyMs is null ? "unknown" : $"{latencyMs.Value} ms";
     }
 
     public void Dispose()
