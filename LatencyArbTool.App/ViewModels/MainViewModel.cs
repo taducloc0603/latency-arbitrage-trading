@@ -19,8 +19,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private CsvLogger? _csvLogger;
     private bool _isRunning;
     private bool _liveMode;
-    private bool _loggedInvalidTimestampA;
-    private bool _loggedInvalidTimestampB;
+    private bool _loggedInvalidLatencyA;
+    private bool _loggedInvalidLatencyB;
     private string _chartHwndText = string.Empty;
     private string _tradeHwndText = string.Empty;
     private string _liveStatus = "Live mode off";
@@ -201,8 +201,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var nowTickCountMs = Environment.TickCount64;
         var (gapBuy, gapSell) = GapCalculator.Calculate(tickA.Tick, tickB.Tick);
-        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell);
+        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs);
 
         _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread);
         var thresholds = _stats.GetThresholds();
@@ -210,7 +211,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var events = _clusterEngine.Step(snapshot, thresholds, signal);
 
         UpdateMarketUi(snapshot, thresholds);
-        LogInvalidTimestampWarnings(snapshot);
+        LogInvalidLatencyWarnings(snapshot);
         UpdateClusterUi();
         _csvLogger?.LogTick(snapshot, thresholds);
 
@@ -272,34 +273,34 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         PeakTrough = cluster is null ? "-" : $"{F(cluster.PeakAskA)} / {F(cluster.TroughBidA)}";
     }
 
-    private void LogInvalidTimestampWarnings(MarketSnapshot snapshot)
+    private void LogInvalidLatencyWarnings(MarketSnapshot snapshot)
     {
-        if (!snapshot.HasValidFeedATimestamp && !_loggedInvalidTimestampA)
+        if (!snapshot.HasValidFeedALatency && !_loggedInvalidLatencyA)
         {
-            AddLog($"feed A invalid tick timestamp: timestampMs={snapshot.A.TimestampMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, source={snapshot.FeedALatency.Source}");
-            _loggedInvalidTimestampA = true;
+            AddLog($"feed A invalid tick latency: eaTickCountMs={snapshot.A.EaTickCountMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedALatencyMs)}, source={snapshot.FeedALatency.Source}");
+            _loggedInvalidLatencyA = true;
         }
-        else if (snapshot.HasValidFeedATimestamp)
+        else if (snapshot.HasValidFeedALatency)
         {
-            if (_loggedInvalidTimestampA)
+            if (_loggedInvalidLatencyA)
             {
-                AddLog($"feed A latency recovered: latencyMs={snapshot.FeedALatencyMs}, source={snapshot.FeedALatency.Source}");
+                AddLog($"feed A latency recovered: eaTickCountMs={snapshot.A.EaTickCountMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedALatencyMs)}, source={snapshot.FeedALatency.Source}");
             }
-            _loggedInvalidTimestampA = false;
+            _loggedInvalidLatencyA = false;
         }
 
-        if (!snapshot.HasValidFeedBTimestamp && !_loggedInvalidTimestampB)
+        if (!snapshot.HasValidFeedBLatency && !_loggedInvalidLatencyB)
         {
-            AddLog($"feed B invalid tick timestamp: timestampMs={snapshot.B.TimestampMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, source={snapshot.FeedBLatency.Source}");
-            _loggedInvalidTimestampB = true;
+            AddLog($"feed B invalid tick latency: eaTickCountMs={snapshot.B.EaTickCountMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedBLatencyMs)}, source={snapshot.FeedBLatency.Source}");
+            _loggedInvalidLatencyB = true;
         }
-        else if (snapshot.HasValidFeedBTimestamp)
+        else if (snapshot.HasValidFeedBLatency)
         {
-            if (_loggedInvalidTimestampB)
+            if (_loggedInvalidLatencyB)
             {
-                AddLog($"feed B latency recovered: latencyMs={snapshot.FeedBLatencyMs}, source={snapshot.FeedBLatency.Source}");
+                AddLog($"feed B latency recovered: eaTickCountMs={snapshot.B.EaTickCountMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedBLatencyMs)}, source={snapshot.FeedBLatency.Source}");
             }
-            _loggedInvalidTimestampB = false;
+            _loggedInvalidLatencyB = false;
         }
     }
 
@@ -340,6 +341,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private static string FormatLatency(long? latencyMs)
     {
         return latencyMs is null ? "unknown" : $"{latencyMs.Value} ms";
+    }
+
+    private static string FormatNullableLatency(long? latencyMs)
+    {
+        return latencyMs?.ToString(CultureInfo.InvariantCulture) ?? "null";
     }
 
     public void Dispose()

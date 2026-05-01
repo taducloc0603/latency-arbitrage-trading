@@ -19,7 +19,7 @@ public sealed class DryRunClusterEngine
 
         if (snapshot.FeedAIsStale)
         {
-            EnterEmergency(snapshot, events, snapshot.HasValidFeedATimestamp ? "feed A stale" : "feed A invalid tick timestamp");
+            EnterEmergency(snapshot, events, snapshot.HasValidFeedALatency ? "feed A stale" : "feed A invalid tick latency");
             return events;
         }
 
@@ -235,7 +235,7 @@ public sealed class DryRunClusterEngine
     {
         if (snapshot.FeedBIsStale)
         {
-            events.Add(Block(snapshot, snapshot.HasValidFeedBTimestamp ? "feed B stale" : "feed B invalid tick timestamp"));
+            events.Add(Block(snapshot, snapshot.HasValidFeedBLatency ? "feed B stale" : "feed B invalid tick latency"));
             return false;
         }
 

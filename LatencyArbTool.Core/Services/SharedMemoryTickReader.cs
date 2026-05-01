@@ -9,8 +9,7 @@ namespace LatencyArbTool.Core.Services;
 [SupportedOSPlatform("windows")]
 public sealed class SharedMemoryTickReader
 {
-    private const int MapSize = 112;
-    private const int SupportedVersion = 1;
+    private const int MapSize = 64;
 
     public bool MapExists(string mapName)
     {
@@ -46,18 +45,18 @@ public sealed class SharedMemoryTickReader
             using var mmf = MemoryMappedFile.OpenExisting(mapName);
             using var accessor = mmf.CreateViewAccessor(0, MapSize, MemoryMappedFileAccess.Read);
 
-            var version = accessor.ReadInt32(0);
-            if (version != SupportedVersion)
+            var count = accessor.ReadInt32(0);
+            if (count <= 0)
             {
-                return TickReadResult.Fail($"unsupported version {version}");
+                return TickReadResult.Fail("no tick data");
             }
 
-            var timestampMs = accessor.ReadInt64(4);
+            var eaTickCountMs = accessor.ReadInt64(4);
             var bid = accessor.ReadDouble(16);
             var ask = accessor.ReadDouble(24);
             var spread = accessor.ReadDouble(32);
             var tickTimeMsc = accessor.ReadInt64(40);
-            var symbolBytes = new byte[64];
+            var symbolBytes = new byte[16];
             accessor.ReadArray(48, symbolBytes, 0, symbolBytes.Length);
             var symbol = Encoding.UTF8.GetString(symbolBytes).TrimEnd('\0', ' ');
 
@@ -67,8 +66,8 @@ public sealed class SharedMemoryTickReader
             }
 
             return TickReadResult.Ok(new TickRecord(
-                version,
-                timestampMs,
+                count,
+                eaTickCountMs,
                 bid,
                 ask,
                 spread,

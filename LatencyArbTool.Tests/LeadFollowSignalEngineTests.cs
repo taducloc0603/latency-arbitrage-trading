@@ -46,7 +46,7 @@ public sealed class LeadFollowSignalEngineTests
     {
         var a = Tick(nowMs, 100, 101);
         var b = Tick(nowMs, 100, 101);
-        return new MarketSnapshot(a, b, nowMs, gapBuy, gapSell);
+        return new MarketSnapshot(a, b, nowMs, gapBuy, gapSell, nowMs);
     }
 
     private static TickRecord Tick(long nowMs, double bid, double ask)
@@ -54,4 +54,3 @@ public sealed class LeadFollowSignalEngineTests
         return new TickRecord(1, nowMs, bid, ask, 1, nowMs, "XAUUSD");
     }
 }
-

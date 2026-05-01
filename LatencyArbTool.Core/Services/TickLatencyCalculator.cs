@@ -3,68 +3,47 @@ namespace LatencyArbTool.Core.Services;
 public static class TickLatencyCalculator
 {
     private const long MinUnixMs = 946684800000; // 2000-01-01T00:00:00Z
-    private const long MinUnixSeconds = MinUnixMs / 1000;
-    private const long MaxFutureSkewMs = 60000;
-    private const long MaxFutureSkewSeconds = MaxFutureSkewMs / 1000;
+    public const long MaxReasonableLatencyMs = 86_400_000;
 
-    public static long? TryGetLatencyMs(long nowMs, long timestampMs, long tickTimeMsc)
+    public static long? TryGetLatencyMs(long nowUnixMs, long nowTickCountMs, long eaTickCountMs, long tickTimeMsc)
     {
-        return ResolveLatencyMs(nowMs, timestampMs, tickTimeMsc).LatencyMs;
+        return ResolveLatencyMs(nowUnixMs, nowTickCountMs, eaTickCountMs, tickTimeMsc).LatencyMs;
     }
 
-    public static TickLatencyResult ResolveLatencyMs(long nowMs, long timestampMs, long tickTimeMsc)
+    public static TickLatencyResult ResolveLatencyMs(long nowUnixMs, long nowTickCountMs, long eaTickCountMs, long tickTimeMsc)
     {
-        var normalizedTimestampMs = NormalizeUnixTimestampMs(nowMs, timestampMs);
-        if (normalizedTimestampMs is not null)
+        if (eaTickCountMs > 0)
         {
-            return new TickLatencyResult(Math.Max(0, nowMs - normalizedTimestampMs.Value), TickLatencySource.TimestampMs);
+            var tickCountLatencyMs = nowTickCountMs - eaTickCountMs;
+            if (IsReasonableLatency(tickCountLatencyMs))
+            {
+                return new TickLatencyResult(tickCountLatencyMs, TickLatencySource.EaTickCount);
+            }
         }
 
-        var normalizedTickTimeMsc = NormalizeUnixTimestampMs(nowMs, tickTimeMsc);
-        if (normalizedTickTimeMsc is not null)
+        var timestampLatencyMs = TryGetUnixLatencyMs(nowUnixMs, tickTimeMsc);
+        if (timestampLatencyMs is not null)
         {
-            return new TickLatencyResult(Math.Max(0, nowMs - normalizedTickTimeMsc.Value), TickLatencySource.TickTimeMsc);
+            return new TickLatencyResult(timestampLatencyMs.Value, TickLatencySource.TickTimeMscFallback);
         }
 
         return new TickLatencyResult(null, TickLatencySource.Null);
     }
 
-    public static long? GetEffectiveTimestampMs(long nowMs, long timestampMs, long tickTimeMsc)
+    private static long? TryGetUnixLatencyMs(long nowUnixMs, long tickTimeMsc)
     {
-        var normalizedTimestampMs = NormalizeUnixTimestampMs(nowMs, timestampMs);
-        if (normalizedTimestampMs is not null)
+        if (tickTimeMsc < MinUnixMs)
         {
-            return normalizedTimestampMs;
+            return null;
         }
 
-        var normalizedTickTimeMsc = NormalizeUnixTimestampMs(nowMs, tickTimeMsc);
-        if (normalizedTickTimeMsc is not null)
-        {
-            return normalizedTickTimeMsc;
-        }
-
-        return null;
+        var latencyMs = nowUnixMs - tickTimeMsc;
+        return IsReasonableLatency(latencyMs) ? latencyMs : null;
     }
 
-    public static bool IsValidUnixMs(long nowMs, long value)
+    private static bool IsReasonableLatency(long latencyMs)
     {
-        return NormalizeUnixTimestampMs(nowMs, value) is not null;
-    }
-
-    public static long? NormalizeUnixTimestampMs(long nowMs, long value)
-    {
-        if (value >= MinUnixMs && value <= nowMs + MaxFutureSkewMs)
-        {
-            return value;
-        }
-
-        var nowSeconds = nowMs / 1000;
-        if (value >= MinUnixSeconds && value <= nowSeconds + MaxFutureSkewSeconds)
-        {
-            return value * 1000;
-        }
-
-        return null;
+        return latencyMs >= 0 && latencyMs <= MaxReasonableLatencyMs;
     }
 }
 
@@ -72,7 +51,7 @@ public sealed record TickLatencyResult(long? LatencyMs, TickLatencySource Source
 
 public enum TickLatencySource
 {
-    TimestampMs,
-    TickTimeMsc,
+    EaTickCount,
+    TickTimeMscFallback,
     Null
 }

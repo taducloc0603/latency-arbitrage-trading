@@ -6,8 +6,10 @@ Tai lieu nay ghi lai cac thong so va dieu kien dong/mo lenh hien tai cua tool.
 
 - Map A mac dinh: `Local\MT_A_Tick`
 - Map B mac dinh: `Local\MT_B_Tick`
-- Tool doc tick tu shared memory, moi tick gom: `Bid`, `Ask`, `Spread`, `TimestampMs`, `TickTimeMsc`, `Symbol`.
-- `Latency` duoc tinh bang `nowMs - timestamp`. Tool chap nhan timestamp dang Unix milliseconds hoac Unix seconds. Neu ca `TimestampMs` va `TickTimeMsc` deu khong hop le thi hien `unknown`.
+- Tool doc tick tu shared memory, layout tick hien tai: `count:int32`, `ea_ms:uint64`, padding `4` bytes, `Bid`, `Ask`, `Spread`, `TickTimeMsc`, `Symbol[16]`.
+- `ea_ms` la clock monotonic tu Windows `GetTickCount64` ben EA, khong phai Unix epoch.
+- `Latency` duoc tinh uu tien bang `Environment.TickCount64 - ea_ms`. Gia tri hop le phai nam trong khoang `0..86_400_000ms` (24h).
+- Neu `ea_ms` thieu/khong hop le, tool chi fallback sang `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - TickTimeMsc` khi `TickTimeMsc` la Unix epoch milliseconds hop le. Neu ca 2 nguon khong hop le thi hien `unknown`.
 - Symbol A/B khong can giong nhau. Dieu kien `symbol mismatch` da duoc bo.
 
 ## Cong thuc va nguong

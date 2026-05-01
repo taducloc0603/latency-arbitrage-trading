@@ -7,14 +7,15 @@ public sealed record MarketSnapshot(
     TickRecord B,
     long NowMs,
     int GapBuy,
-    int GapSell)
+    int GapSell,
+    long NowTickCountMs)
 {
-    public TickLatencyResult FeedALatency => TickLatencyCalculator.ResolveLatencyMs(NowMs, A.TimestampMs, A.TickTimeMsc);
-    public TickLatencyResult FeedBLatency => TickLatencyCalculator.ResolveLatencyMs(NowMs, B.TimestampMs, B.TickTimeMsc);
+    public TickLatencyResult FeedALatency => TickLatencyCalculator.ResolveLatencyMs(NowMs, NowTickCountMs, A.EaTickCountMs, A.TickTimeMsc);
+    public TickLatencyResult FeedBLatency => TickLatencyCalculator.ResolveLatencyMs(NowMs, NowTickCountMs, B.EaTickCountMs, B.TickTimeMsc);
     public long? FeedALatencyMs => FeedALatency.LatencyMs;
     public long? FeedBLatencyMs => FeedBLatency.LatencyMs;
-    public bool HasValidFeedATimestamp => FeedALatencyMs is not null;
-    public bool HasValidFeedBTimestamp => FeedBLatencyMs is not null;
+    public bool HasValidFeedALatency => FeedALatencyMs is not null;
+    public bool HasValidFeedBLatency => FeedBLatencyMs is not null;
     public bool FeedAIsStale => FeedALatencyMs is null || FeedALatencyMs > StrategyDefaults.FeedAStaleMs;
     public bool FeedBIsStale => FeedBLatencyMs is null || FeedBLatencyMs > StrategyDefaults.FeedBStaleMs;
 }

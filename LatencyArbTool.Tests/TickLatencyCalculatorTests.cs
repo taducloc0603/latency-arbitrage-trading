@@ -5,65 +5,72 @@ namespace LatencyArbTool.Tests;
 
 public sealed class TickLatencyCalculatorTests
 {
-    private const long NowMs = 1_777_397_957_338;
+    private const long NowUnixMs = 1_777_397_957_338;
+    private const long NowTickCountMs = 10_000_000;
 
     [Fact]
-    public void TryGetLatencyMs_UsesTimestampMsWhenValid()
+    public void TryGetLatencyMs_UsesEaTickCountWhenValid()
     {
-        var result = TickLatencyCalculator.ResolveLatencyMs(NowMs, NowMs - 123, NowMs - 999);
+        var result = TickLatencyCalculator.ResolveLatencyMs(NowUnixMs, NowTickCountMs, NowTickCountMs - 35, NowUnixMs - 999);
 
-        Assert.Equal(123, result.LatencyMs);
-        Assert.Equal(TickLatencySource.TimestampMs, result.Source);
+        Assert.Equal(35, result.LatencyMs);
+        Assert.Equal(TickLatencySource.EaTickCount, result.Source);
     }
 
     [Fact]
-    public void TryGetLatencyMs_FallsBackToTickTimeMsc()
+    public void TryGetLatencyMs_FallsBackWhenEaTickCountIsFuture()
     {
-        var result = TickLatencyCalculator.ResolveLatencyMs(NowMs, 0, NowMs - 456);
+        var result = TickLatencyCalculator.ResolveLatencyMs(NowUnixMs, NowTickCountMs, NowTickCountMs + 1, NowUnixMs - 456);
 
         Assert.Equal(456, result.LatencyMs);
-        Assert.Equal(TickLatencySource.TickTimeMsc, result.Source);
+        Assert.Equal(TickLatencySource.TickTimeMscFallback, result.Source);
     }
 
     [Fact]
-    public void TryGetLatencyMs_NormalizesUnixSeconds()
+    public void TryGetLatencyMs_FallsBackWhenEaTickCountLatencyIsTooLarge()
     {
-        var result = TickLatencyCalculator.ResolveLatencyMs(NowMs, (NowMs - 1338) / 1000, 0);
+        var result = TickLatencyCalculator.ResolveLatencyMs(
+            NowUnixMs,
+            NowTickCountMs,
+            NowTickCountMs - TickLatencyCalculator.MaxReasonableLatencyMs - 1,
+            NowUnixMs - 1338);
 
         Assert.Equal(1338, result.LatencyMs);
-        Assert.Equal(TickLatencySource.TimestampMs, result.Source);
+        Assert.Equal(TickLatencySource.TickTimeMscFallback, result.Source);
     }
 
     [Fact]
-    public void TryGetLatencyMs_ReturnsNullWhenBothTimestampsAreInvalid()
+    public void TryGetLatencyMs_FallsBackWhenEaTickCountIsMissing()
     {
-        var result = TickLatencyCalculator.ResolveLatencyMs(NowMs, 0, 1);
+        var result = TickLatencyCalculator.ResolveLatencyMs(NowUnixMs, NowTickCountMs, 0, NowUnixMs - 789);
+
+        Assert.Equal(789, result.LatencyMs);
+        Assert.Equal(TickLatencySource.TickTimeMscFallback, result.Source);
+    }
+
+    [Fact]
+    public void TryGetLatencyMs_ReturnsNullWhenTickTimeMscIsFuture()
+    {
+        var result = TickLatencyCalculator.ResolveLatencyMs(NowUnixMs, NowTickCountMs, 0, NowUnixMs + 1);
 
         Assert.Null(result.LatencyMs);
         Assert.Equal(TickLatencySource.Null, result.Source);
     }
 
     [Fact]
-    public void TryGetLatencyMs_RejectsTimestampTooFarInFuture()
+    public void TryGetLatencyMs_ReturnsNullWhenBothSourcesAreInvalid()
     {
-        var latency = TickLatencyCalculator.TryGetLatencyMs(NowMs, NowMs + 60001, 0);
+        var result = TickLatencyCalculator.ResolveLatencyMs(NowUnixMs, NowTickCountMs, NowTickCountMs + 1, 1);
 
-        Assert.Null(latency);
+        Assert.Null(result.LatencyMs);
+        Assert.Equal(TickLatencySource.Null, result.Source);
     }
 
     [Fact]
-    public void TryGetLatencyMs_RejectsTimestampBeforeYear2000()
-    {
-        var latency = TickLatencyCalculator.TryGetLatencyMs(NowMs, 946684799999, 0);
-
-        Assert.Null(latency);
-    }
-
-    [Fact]
-    public void MarketSnapshot_ReportsUnknownLatencyForInvalidTimestamp()
+    public void MarketSnapshot_ReportsUnknownLatencyForInvalidSources()
     {
         var tick = new TickRecord(1, 0, 100, 101, 1, 0, "XAUUSD");
-        var snapshot = new MarketSnapshot(tick, tick, NowMs, -50, 30);
+        var snapshot = new MarketSnapshot(tick, tick, NowUnixMs, -50, 30, NowTickCountMs);
 
         Assert.Null(snapshot.FeedALatencyMs);
         Assert.Equal(TickLatencySource.Null, snapshot.FeedALatency.Source);

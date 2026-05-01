@@ -183,8 +183,9 @@ public sealed class DryRunClusterEngineTests
         string symbolB = "XAUUSD")
     {
         var effectiveNowMs = BaseNowMs + nowMs;
-        var a = new TickRecord(1, effectiveNowMs + tickAOffsetMs, bidA, askA, askA - bidA, effectiveNowMs + tickAOffsetMs, symbolA);
-        var b = new TickRecord(1, effectiveNowMs + tickBOffsetMs, bidB, askB, spreadB, effectiveNowMs + tickBOffsetMs, symbolB);
-        return new MarketSnapshot(a, b, effectiveNowMs, gapBuy, gapSell);
+        var effectiveTickCountMs = 10_000_000 + nowMs;
+        var a = new TickRecord(1, effectiveTickCountMs + tickAOffsetMs, bidA, askA, askA - bidA, effectiveNowMs + tickAOffsetMs, symbolA);
+        var b = new TickRecord(1, effectiveTickCountMs + tickBOffsetMs, bidB, askB, spreadB, effectiveNowMs + tickBOffsetMs, symbolB);
+        return new MarketSnapshot(a, b, effectiveNowMs, gapBuy, gapSell, effectiveTickCountMs);
     }
 }

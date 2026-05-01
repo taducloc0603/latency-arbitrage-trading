@@ -21,7 +21,7 @@ public sealed class CsvLogger : IDisposable
         _decisions = Create(Path.Combine(logsDirectory, $"decisions_{stamp}.csv"));
         _clusters = Create(Path.Combine(logsDirectory, $"clusters_{stamp}.csv"));
 
-        _ticks.WriteLine("timestamp,bidA,askA,bidB,askB,spreadA,spreadB,gapBuy,gapSell,openBuyThreshold,openSellThreshold,isWarmup");
+        _ticks.WriteLine("timestamp,bidA,askA,bidB,askB,spreadA,spreadB,latencyA,latencyASource,latencyB,latencyBSource,gapBuy,gapSell,openBuyThreshold,openSellThreshold,isWarmup");
         _decisions.WriteLine("timestamp,state,decision,reason,gapBuy,gapSell,openBuyThreshold,openSellThreshold");
         _clusters.WriteLine("clusterId,event,side,orderCount,openPrice,closePrice,lot,pnlRaw,holdMs,closeReason");
     }
@@ -36,6 +36,10 @@ public sealed class CsvLogger : IDisposable
             F(snapshot.B.Ask),
             F(snapshot.A.Spread),
             F(snapshot.B.Spread),
+            snapshot.FeedALatencyMs?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            snapshot.FeedALatency.Source,
+            snapshot.FeedBLatencyMs?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            snapshot.FeedBLatency.Source,
             snapshot.GapBuy,
             snapshot.GapSell,
             thresholds.OpenBuy,
