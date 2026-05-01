@@ -13,11 +13,13 @@ public sealed class CsvLoggerTests
 
         try
         {
-            using var logger = new CsvLogger(directory);
-            var snapshot = Snapshot();
-            var thresholds = new GapThresholds(-50, 30, -15, 20, 0, 0, 0, 0, 1, 1, true);
-            logger.LogDecision(new DryRunEvent("guard block", "feed B stale", BotState.Idle, 1), snapshot, thresholds);
-            logger.Flush();
+            using (var logger = new CsvLogger(directory))
+            {
+                var snapshot = Snapshot();
+                var thresholds = new GapThresholds(-50, 30, -15, 20, 0, 0, 0, 0, 1, 1, true);
+                logger.LogDecision(new DryRunEvent("guard block", "feed B stale", BotState.Idle, 1), snapshot, thresholds);
+                logger.Flush();
+            }
 
             var decisions = Directory.GetFiles(Path.Combine(directory, "logs"), "decisions_*.csv").Single();
             var lines = File.ReadAllLines(decisions);
@@ -37,4 +39,3 @@ public sealed class CsvLoggerTests
         return new MarketSnapshot(a, b, 1, -50, 30);
     }
 }
-
