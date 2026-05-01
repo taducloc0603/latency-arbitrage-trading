@@ -26,15 +26,23 @@
     </Window.Resources>
 
     <DockPanel Margin="16">
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,16">
-            <TextBlock Text="Map A" Margin="0,0,8,0" />
-            <TextBox Text="{Binding MapNameA, UpdateSourceTrigger=PropertyChanged}" />
-            <TextBlock Text="Map B" Margin="0,0,8,0" />
-            <TextBox Text="{Binding MapNameB, UpdateSourceTrigger=PropertyChanged}" />
-            <Button Content="Check Maps" Command="{Binding CheckMapsCommand}" />
-            <Button Content="Start" Command="{Binding StartCommand}" />
-            <Button Content="Stop" Command="{Binding StopCommand}" />
-            <Button Content="Reset Dry-Run" Command="{Binding ResetCommand}" />
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="Map A" Margin="0,0,8,0" />
+                <TextBox Text="{Binding MapNameA, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text="Map B" Margin="0,0,8,0" />
+                <TextBox Text="{Binding MapNameB, UpdateSourceTrigger=PropertyChanged}" />
+                <Button Content="Check Maps" Command="{Binding CheckMapsCommand}" />
+                <Button Content="Start" Command="{Binding StartCommand}" />
+                <Button Content="Stop" Command="{Binding StopCommand}" />
+                <Button Content="Reset Dry-Run" Command="{Binding ResetCommand}" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <CheckBox Content="LiveMode" IsChecked="{Binding LiveMode}" Margin="0,0,16,0" VerticalAlignment="Center" />
+                <TextBlock Text="MT5 Chart HWND" Margin="0,0,8,0" />
+                <TextBox Text="{Binding ChartHwndText, UpdateSourceTrigger=PropertyChanged}" MinWidth="220" />
+                <TextBlock Text="{Binding LiveStatus}" FontWeight="SemiBold" />
+            </StackPanel>
         </StackPanel>
 
         <Grid>

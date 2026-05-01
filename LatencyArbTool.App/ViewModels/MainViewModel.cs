@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Threading;
+using LatencyArbTool.App.Services;
 using LatencyArbTool.Core.Models;
 using LatencyArbTool.Core.Services;
 
@@ -12,9 +13,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly RollingGapStats _stats = new();
     private readonly LeadFollowSignalEngine _signalEngine = new();
     private readonly DryRunClusterEngine _clusterEngine = new();
+    private readonly Mt5Engine _mt5Engine = new();
+    private readonly Mt5TradeExecutor _tradeExecutor;
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
     private bool _isRunning;
+    private bool _liveMode;
+    private string _chartHwndText = string.Empty;
+    private string _liveStatus = "Live mode off";
     private string _mapNameA = "FeedA";
     private string _mapNameB = "FeedB";
     private string _statusA = "Disconnected";
@@ -43,6 +49,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public MainViewModel()
     {
+        _tradeExecutor = new Mt5TradeExecutor(_mt5Engine);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _timer.Tick += (_, _) => Poll();
 
@@ -62,6 +69,33 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         get => _mapNameB;
         set => SetProperty(ref _mapNameB, value);
+    }
+
+    public bool LiveMode
+    {
+        get => _liveMode;
+        set
+        {
+            if (SetProperty(ref _liveMode, value))
+            {
+                LiveStatus = value ? "Live mode armed; waiting for valid HWND" : "Live mode off";
+                AddLog(value
+                    ? "live mode armed: MT5 actions may be sent when HWND is valid"
+                    : "live mode disabled");
+            }
+        }
+    }
+
+    public string ChartHwndText
+    {
+        get => _chartHwndText;
+        set
+        {
+            if (SetProperty(ref _chartHwndText, value))
+            {
+                UpdateLiveStatus();
+            }
+        }
     }
 
     public bool IsRunning
@@ -100,6 +134,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public int OrderCount { get => _orderCount; private set => SetProperty(ref _orderCount, value); }
     public string FloatingPnl { get => _floatingPnl; private set => SetProperty(ref _floatingPnl, value); }
     public string PeakTrough { get => _peakTrough; private set => SetProperty(ref _peakTrough, value); }
+    public string LiveStatus { get => _liveStatus; private set => SetProperty(ref _liveStatus, value); }
     public ObservableCollection<string> Logs { get; } = [];
     public RelayCommand CheckMapsCommand { get; }
     public RelayCommand StartCommand { get; }
@@ -167,6 +202,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             AddLog($"{dryRunEvent.Decision}: {dryRunEvent.Reason}");
             _csvLogger?.LogDecision(dryRunEvent, snapshot, thresholds);
+            ExecuteLiveIfEnabled(dryRunEvent);
+        }
+    }
+
+    private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent)
+    {
+        var result = _tradeExecutor.Execute(dryRunEvent, LiveMode, ChartHwndText);
+        if (!result.Attempted)
+        {
+            return;
+        }
+
+        var prefix = result.Success ? "live ok" : "live failed";
+        LiveStatus = $"{prefix}: {result.Message}";
+        AddLog($"{prefix}: {result.Message}");
+
+        if (dryRunEvent.Decision == "dry close")
+        {
+            AddLog("live warning: dry close maps to MT5 row 0");
         }
     }
 
@@ -211,6 +265,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void UpdateLiveStatus()
+    {
+        if (!LiveMode)
+        {
+            LiveStatus = "Live mode off";
+            return;
+        }
+
+        LiveStatus = HwndParser.TryParse(ChartHwndText, out var hwnd, out var error)
+            ? $"Live mode armed for HWND 0x{hwnd:X}"
+            : $"Live mode blocked: {error}";
+    }
+
     private static string F(double value)
     {
         return value.ToString("0.#####", CultureInfo.InvariantCulture);
@@ -220,5 +287,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _timer.Stop();
         _csvLogger?.Dispose();
+        _mt5Engine.Dispose();
     }
 }

@@ -30,7 +30,7 @@ public sealed class DryRunClusterEngineTests
     }
 
     [Fact]
-    public void Step_StacksBuyOnCooldownAndStopsAtLotBandLimit()
+    public void Step_DoesNotStackWhileSingleOrderModeIsEnabled()
     {
         var engine = new DryRunClusterEngine();
         engine.Step(Snapshot(0, gapBuy: -60, gapSell: 0), Thresholds(), SignalSide.BuyB);
@@ -42,7 +42,7 @@ public sealed class DryRunClusterEngineTests
         engine.Step(Snapshot(2000, gapBuy: -60, gapSell: 0), Thresholds(), null);
         engine.Step(Snapshot(3000, gapBuy: -60, gapSell: 0), Thresholds(), null);
 
-        Assert.Equal(3, engine.CurrentCluster?.Orders.Count);
+        Assert.Equal(1, engine.CurrentCluster?.Orders.Count);
     }
 
     [Fact]
@@ -168,4 +168,3 @@ public sealed class DryRunClusterEngineTests
         return new MarketSnapshot(a, b, nowMs, gapBuy, gapSell);
     }
 }
-

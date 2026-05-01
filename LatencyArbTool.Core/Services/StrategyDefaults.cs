@@ -15,7 +15,7 @@ public static class StrategyDefaults
     public const int StackCooldownMs = 1000;
     public const int MinHoldMs = 5000;
     public const int MaxHoldMs = 90000;
-    public const int MaxStack = 10;
+    public const int MaxStack = 1;
 
     public const int CloseBuyRevertFallback = -15;
     public const int CloseSellRevertFallback = 20;
@@ -28,4 +28,3 @@ public static class StrategyDefaults
     public const int LotBandOneMaxGap = 60;
     public const int LotBandTwoMaxGap = 70;
 }
-
