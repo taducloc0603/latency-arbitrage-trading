@@ -23,7 +23,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "0", "456");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "0", "456", EmptyTrades());
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
@@ -36,7 +36,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226", EmptyTrades());
 
         Assert.True(result.Success);
         Assert.Equal(1, gateway.BuyCalls);
@@ -50,7 +50,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.SellB), liveMode: true, "chart 12345", "trade 0x50226");
+        var result = executor.Execute(Event("dry open", DryRunSide.SellB), liveMode: true, "chart 12345", "trade 0x50226", EmptyTrades());
 
         Assert.True(result.Success);
         Assert.Equal(0, gateway.BuyCalls);
@@ -64,7 +64,7 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway();
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226");
+        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "chart 0x3039", "trade 0x50226", OneTrade(TradeSide.Buy));
 
         Assert.True(result.Success);
         Assert.Equal(1, gateway.EnsureContextCalls);
@@ -78,16 +78,69 @@ public sealed class Mt5TradeExecutorTests
         var gateway = new FakeGateway { Available = false };
         var executor = new Mt5TradeExecutor(gateway);
 
-        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345", "456");
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345", "456", EmptyTrades());
 
         Assert.True(result.Attempted);
         Assert.False(result.Success);
         Assert.Equal(0, gateway.BuyCalls);
     }
 
+    [Fact]
+    public void Execute_BlocksOpenWhenBTradeAlreadyExists()
+    {
+        var gateway = new FakeGateway();
+        var executor = new Mt5TradeExecutor(gateway);
+
+        var result = executor.Execute(Event("dry open", DryRunSide.BuyB), liveMode: true, "12345", "456", OneTrade(TradeSide.Buy));
+
+        Assert.True(result.Attempted);
+        Assert.False(result.Success);
+        Assert.Equal("B trade already open", result.Message);
+        Assert.Equal(0, gateway.BuyCalls);
+    }
+
+    [Fact]
+    public void Execute_BlocksCloseWhenNoBTradeExists()
+    {
+        var gateway = new FakeGateway();
+        var executor = new Mt5TradeExecutor(gateway);
+
+        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "12345", "456", EmptyTrades());
+
+        Assert.True(result.Attempted);
+        Assert.False(result.Success);
+        Assert.Equal("B trade not open", result.Message);
+        Assert.Null(gateway.ClosedRow);
+    }
+
+    [Fact]
+    public void Execute_BlocksCloseWhenBTradeSideMismatches()
+    {
+        var gateway = new FakeGateway();
+        var executor = new Mt5TradeExecutor(gateway);
+
+        var result = executor.Execute(Event("dry close", DryRunSide.BuyB), liveMode: true, "12345", "456", OneTrade(TradeSide.Sell));
+
+        Assert.True(result.Attempted);
+        Assert.False(result.Success);
+        Assert.Contains("side mismatch", result.Message);
+        Assert.Null(gateway.ClosedRow);
+    }
+
     private static DryRunEvent Event(string decision, DryRunSide side)
     {
         return new DryRunEvent(decision, "test", BotState.Holding, 1, Side: side);
+    }
+
+    private static TradeReadResult EmptyTrades()
+    {
+        return TradeReadResult.Ok("Local\\MT_B_Trade", 1000, Array.Empty<TradeRecord>());
+    }
+
+    private static TradeReadResult OneTrade(TradeSide side)
+    {
+        var trade = new TradeRecord(123456, side, 1.5, 2020.25, 0, 0, 12.34, 1, 999, "XAUUSD");
+        return TradeReadResult.Ok("Local\\MT_B_Trade", 1000, new[] { trade });
     }
 
     private sealed class FakeGateway : IMt5TradeGateway

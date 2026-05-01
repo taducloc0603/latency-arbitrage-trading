@@ -89,6 +89,14 @@
                     <TextBlock Text="{Binding SpreadB}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Latency" />
                     <TextBlock Text="{Binding LatencyB}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Trade map" />
+                    <TextBlock Text="{Binding StatusBTrade}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Open trade" />
+                    <TextBlock Text="{Binding BTradeSummary}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="History map" />
+                    <TextBlock Text="{Binding StatusBHistory}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="Last history" />
+                    <TextBlock Text="{Binding BHistorySummary}" Style="{StaticResource ValueText}" />
                 </UniformGrid>
             </GroupBox>
 

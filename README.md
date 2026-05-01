@@ -10,6 +10,7 @@ Tai lieu nay ghi lai cac thong so va dieu kien dong/mo lenh hien tai cua tool.
 - `ea_ms` la clock monotonic tu Windows `GetTickCount64` ben EA, khong phai Unix epoch.
 - `Latency` duoc tinh uu tien bang `Environment.TickCount64 - ea_ms`. Gia tri hop le phai nam trong khoang `0..86_400_000ms` (24h).
 - Neu `ea_ms` thieu/khong hop le, tool chi fallback sang `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - TickTimeMsc` khi `TickTimeMsc` la Unix epoch milliseconds hop le. Neu ca 2 nguon khong hop le thi hien `unknown`.
+- Live safety chi check lenh that o feed B. Tu `MapNameB`, tool derive map trade/history bang cach thay hau to `Tick`: `Local\MT_B_Tick` -> `Local\MT_B_Trade` va `Local\MT_B_History`. Rieng trade co fallback `Local\MT_B_Trades` de tuong thich writer cu.
 - Symbol A/B khong can giong nhau. Dieu kien `symbol mismatch` da duoc bo.
 
 ## Cong thuc va nguong
@@ -42,6 +43,7 @@ Tool chi mo lenh moi khi:
 - Feed B khong stale.
 - Spread B khong bat thuong.
 - Tin hieu duoc xac nhan lien tuc toi thieu `1000ms`.
+- Khi `LiveMode` bat, B trade map phai doc duoc va khong co lenh B dang mo; neu khong verify duoc thi live open bi chan.
 
 Mo `BuyB` khi:
 
@@ -69,6 +71,8 @@ Dong `BuyB` khi mot trong cac dieu kien sau dung:
 - Da giu toi thieu `5000ms` va `A.Ask <= PeakAskA - 0.30`: dong tai `B.Bid`.
 - Da giu toi thieu `5000ms` va `GapBuy >= -15`: dong tai `B.Bid`.
 - Da giu `>= 90000ms`: dong tai `B.Bid`.
+
+Khi `LiveMode` bat, live close chi duoc gui neu B trade map doc duoc, co it nhat mot lenh dang mo o row 0, va side cua row 0 khop voi side dry-run can dong.
 
 Dong `SellB` khi mot trong cac dieu kien sau dung:
 

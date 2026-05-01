@@ -16,11 +16,18 @@ public sealed class Mt5TradeExecutor
         DryRunEvent dryRunEvent,
         bool liveMode,
         string chartHwndText,
-        string tradeHwndText)
+        string tradeHwndText,
+        TradeReadResult? bTrades = null)
     {
         if (!liveMode)
         {
             return LiveTradeResult.Skipped("live mode disabled");
+        }
+
+        var safety = ValidateBTradeState(dryRunEvent, bTrades);
+        if (safety is not null)
+        {
+            return safety;
         }
 
         if (!_gateway.IsAvailable(out var availabilityError))
@@ -37,6 +44,53 @@ public sealed class Mt5TradeExecutor
             "dry close" => ExecuteCloseRowZero(tradeHwndText),
             _ => LiveTradeResult.Skipped($"ignored event {dryRunEvent.Decision}")
         };
+    }
+
+    private static LiveTradeResult? ValidateBTradeState(DryRunEvent dryRunEvent, TradeReadResult? bTrades)
+    {
+        if (dryRunEvent.Decision is not ("dry open" or "dry close"))
+        {
+            return null;
+        }
+
+        if (bTrades is null)
+        {
+            return LiveTradeResult.Failed("B trade state unavailable");
+        }
+
+        if (!bTrades.Success)
+        {
+            return LiveTradeResult.Failed($"B trade state unavailable: {bTrades.Error}");
+        }
+
+        if (dryRunEvent.Decision == "dry open")
+        {
+            return bTrades.Count == 0
+                ? null
+                : LiveTradeResult.Failed("B trade already open");
+        }
+
+        if (bTrades.Count == 0)
+        {
+            return LiveTradeResult.Failed("B trade not open");
+        }
+
+        var rowZero = bTrades.Trades[0];
+        var expectedSide = dryRunEvent.Side switch
+        {
+            DryRunSide.BuyB => TradeSide.Buy,
+            DryRunSide.SellB => TradeSide.Sell,
+            _ => (TradeSide?)null
+        };
+
+        if (expectedSide is null)
+        {
+            return LiveTradeResult.Failed("dry close side missing");
+        }
+
+        return rowZero.Side == expectedSide.Value
+            ? null
+            : LiveTradeResult.Failed($"B trade row 0 side mismatch: expected {expectedSide}, actual {rowZero.Side}");
     }
 
     private LiveTradeResult ExecuteOpen(string action, string chartHwndText, HwndAction execute)

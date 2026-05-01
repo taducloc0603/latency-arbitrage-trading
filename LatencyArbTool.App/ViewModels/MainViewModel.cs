@@ -10,6 +10,8 @@ namespace LatencyArbTool.App.ViewModels;
 public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly SharedMemoryTickReader _reader = new();
+    private readonly SharedMemoryTradeReader _tradeReader = new();
+    private readonly SharedMemoryHistoryReader _historyReader = new();
     private readonly RollingGapStats _stats = new();
     private readonly LeadFollowSignalEngine _signalEngine = new();
     private readonly DryRunClusterEngine _clusterEngine = new();
@@ -21,6 +23,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _liveMode;
     private bool _loggedInvalidLatencyA;
     private bool _loggedInvalidLatencyB;
+    private bool _loggedBTradeDisconnected;
+    private bool _loggedBHistoryDisconnected;
+    private long _nextBPositionReadTickCountMs;
     private string _chartHwndText = string.Empty;
     private string _tradeHwndText = string.Empty;
     private string _liveStatus = "Live mode off";
@@ -28,6 +33,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _mapNameB = @"Local\MT_B_Tick";
     private string _statusA = "Disconnected";
     private string _statusB = "Disconnected";
+    private string _statusBTrade = "Disconnected";
+    private string _statusBHistory = "Disconnected";
     private string _symbolA = "-";
     private string _symbolB = "-";
     private string _bidA = "-";
@@ -38,6 +45,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _askB = "-";
     private string _spreadB = "-";
     private string _latencyB = "-";
+    private string _bTradeSummary = "-";
+    private string _bHistorySummary = "-";
     private int _gapBuy;
     private int _gapSell;
     private int _openBuyThreshold = StrategyDefaults.FixedOpenBuyFallback;
@@ -71,8 +80,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string MapNameB
     {
         get => _mapNameB;
-        set => SetProperty(ref _mapNameB, value);
+        set
+        {
+            if (SetProperty(ref _mapNameB, value))
+            {
+                OnPropertyChanged(nameof(MapNameBTrade));
+                OnPropertyChanged(nameof(MapNameBHistory));
+            }
+        }
     }
+
+    public string MapNameBTrade => SharedMemoryMapNames.TradeFromTick(MapNameB);
+
+    public string MapNameBHistory => SharedMemoryMapNames.HistoryFromTick(MapNameB);
 
     public bool LiveMode
     {
@@ -128,6 +148,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string StatusA { get => _statusA; private set => SetProperty(ref _statusA, value); }
     public string StatusB { get => _statusB; private set => SetProperty(ref _statusB, value); }
+    public string StatusBTrade { get => _statusBTrade; private set => SetProperty(ref _statusBTrade, value); }
+    public string StatusBHistory { get => _statusBHistory; private set => SetProperty(ref _statusBHistory, value); }
     public string SymbolA { get => _symbolA; private set => SetProperty(ref _symbolA, value); }
     public string SymbolB { get => _symbolB; private set => SetProperty(ref _symbolB, value); }
     public string BidA { get => _bidA; private set => SetProperty(ref _bidA, value); }
@@ -138,6 +160,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string AskB { get => _askB; private set => SetProperty(ref _askB, value); }
     public string SpreadB { get => _spreadB; private set => SetProperty(ref _spreadB, value); }
     public string LatencyB { get => _latencyB; private set => SetProperty(ref _latencyB, value); }
+    public string BTradeSummary { get => _bTradeSummary; private set => SetProperty(ref _bTradeSummary, value); }
+    public string BHistorySummary { get => _bHistorySummary; private set => SetProperty(ref _bHistorySummary, value); }
     public int GapBuy { get => _gapBuy; private set => SetProperty(ref _gapBuy, value); }
     public int GapSell { get => _gapSell; private set => SetProperty(ref _gapSell, value); }
     public int OpenBuyThreshold { get => _openBuyThreshold; private set => SetProperty(ref _openBuyThreshold, value); }
@@ -160,7 +184,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         StatusA = _reader.MapExists(MapNameA) ? "Connected" : "Disconnected";
         StatusB = _reader.MapExists(MapNameB) ? "Connected" : "Disconnected";
-        AddLog($"map check: A={StatusA}, B={StatusB}");
+        StatusBTrade = _tradeReader.MapExistsForTickMap(MapNameB) ? "Connected" : "Disconnected";
+        StatusBHistory = _historyReader.MapExistsForTickMap(MapNameB) ? "Connected" : "Disconnected";
+        AddLog($"map check: A={StatusA}, B={StatusB}, BTrade={StatusBTrade}, BHistory={StatusBHistory}");
     }
 
     private void Start()
@@ -190,6 +216,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void Poll()
     {
+        var nowTickCountMs = Environment.TickCount64;
+        UpdateBPositionMaps(nowTickCountMs);
+
         var tickA = _reader.TryRead(MapNameA);
         var tickB = _reader.TryRead(MapNameB);
         StatusA = tickA.Success ? "Connected" : $"Disconnected: {tickA.Error}";
@@ -201,7 +230,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var nowTickCountMs = Environment.TickCount64;
         var (gapBuy, gapSell) = GapCalculator.Calculate(tickA.Tick, tickB.Tick);
         var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs);
 
@@ -225,7 +253,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent)
     {
-        var result = _tradeExecutor.Execute(dryRunEvent, LiveMode, ChartHwndText, TradeHwndText);
+        var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
+        var bHistory = _historyReader.TryReadForTickMap(MapNameB);
+        UpdateBTradeUi(bTrades, logTransitions: true);
+        UpdateBHistoryUi(bHistory, logTransitions: true);
+
+        var result = _tradeExecutor.Execute(dryRunEvent, LiveMode, ChartHwndText, TradeHwndText, bTrades);
         if (!result.Attempted)
         {
             return;
@@ -235,9 +268,70 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         LiveStatus = $"{prefix}: {result.Message}";
         AddLog($"{prefix}: {result.Message}");
 
+        if (result.Success)
+        {
+            AddLog($"live audit: {FormatTradeAudit(bTrades)}; {FormatHistoryAudit(bHistory)}");
+        }
+
         if (dryRunEvent.Decision == "dry close")
         {
             AddLog("live warning: dry close maps to MT5 row 0");
+        }
+    }
+
+    private void UpdateBPositionMaps(long nowTickCountMs)
+    {
+        if (nowTickCountMs < _nextBPositionReadTickCountMs)
+        {
+            return;
+        }
+
+        _nextBPositionReadTickCountMs = nowTickCountMs + 1000;
+        UpdateBTradeUi(_tradeReader.TryReadForTickMap(MapNameB), logTransitions: true);
+        UpdateBHistoryUi(_historyReader.TryReadForTickMap(MapNameB), logTransitions: true);
+    }
+
+    private void UpdateBTradeUi(TradeReadResult result, bool logTransitions)
+    {
+        StatusBTrade = result.Success ? $"Connected: {result.Count} open" : $"Disconnected: {result.Error}";
+        BTradeSummary = FormatTradeSummary(result);
+
+        if (!logTransitions)
+        {
+            return;
+        }
+
+        if (!result.Success && !_loggedBTradeDisconnected)
+        {
+            AddLog($"B trade map disconnected: map={result.MapName}, error={result.Error}");
+            _loggedBTradeDisconnected = true;
+        }
+        else if (result.Success && _loggedBTradeDisconnected)
+        {
+            AddLog($"B trade map recovered: map={result.MapName}, openTrades={result.Count}");
+            _loggedBTradeDisconnected = false;
+        }
+    }
+
+    private void UpdateBHistoryUi(HistoryReadResult result, bool logTransitions)
+    {
+        StatusBHistory = result.Success ? $"Connected: {result.Count} history" : $"Disconnected: {result.Error}";
+        BHistorySummary = FormatHistorySummary(result);
+
+        if (!logTransitions)
+        {
+            return;
+        }
+
+        if (!result.Success && !_loggedBHistoryDisconnected)
+        {
+            AddLog($"B history map disconnected: map={result.MapName}, error={result.Error}");
+            _loggedBHistoryDisconnected = true;
+        }
+        else if (result.Success && _loggedBHistoryDisconnected)
+        {
+            AddLog($"B history map recovered: map={result.MapName}, history={result.Count}");
+            _loggedBHistoryDisconnected = false;
         }
     }
 
@@ -341,6 +435,70 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private static string FormatLatency(long? latencyMs)
     {
         return latencyMs is null ? "unknown" : $"{latencyMs.Value} ms";
+    }
+
+    private static string FormatTradeSummary(TradeReadResult result)
+    {
+        if (!result.Success)
+        {
+            return "-";
+        }
+
+        if (result.Count == 0)
+        {
+            return "0 open";
+        }
+
+        var trade = result.Trades[0];
+        return $"{result.Count} open: #{trade.Ticket} {trade.Side} {F(trade.Lot)} pnl={F(trade.Profit)}";
+    }
+
+    private static string FormatHistorySummary(HistoryReadResult result)
+    {
+        if (!result.Success)
+        {
+            return "-";
+        }
+
+        if (result.Count == 0)
+        {
+            return "0 history";
+        }
+
+        var history = result.History[^1];
+        return $"{result.Count} history: #{history.Ticket} {history.Side} pnl={F(history.Profit)}";
+    }
+
+    private static string FormatTradeAudit(TradeReadResult result)
+    {
+        return result.Success ? $"B trades count={result.Count}, first={FormatFirstTrade(result)}" : $"B trades unavailable: {result.Error}";
+    }
+
+    private static string FormatHistoryAudit(HistoryReadResult result)
+    {
+        return result.Success ? $"B history count={result.Count}, last={FormatLastHistory(result)}" : $"B history unavailable: {result.Error}";
+    }
+
+    private static string FormatFirstTrade(TradeReadResult result)
+    {
+        if (result.Count == 0)
+        {
+            return "none";
+        }
+
+        var trade = result.Trades[0];
+        return $"#{trade.Ticket}/{trade.Side}/lot={F(trade.Lot)}/pnl={F(trade.Profit)}";
+    }
+
+    private static string FormatLastHistory(HistoryReadResult result)
+    {
+        if (result.Count == 0)
+        {
+            return "none";
+        }
+
+        var history = result.History[^1];
+        return $"#{history.Ticket}/{history.Side}/pnl={F(history.Profit)}";
     }
 
     private static string FormatNullableLatency(long? latencyMs)
