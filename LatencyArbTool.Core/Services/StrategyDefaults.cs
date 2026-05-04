@@ -13,13 +13,13 @@ public static class StrategyDefaults
 
     public const int ConfirmMs = 500;
     public const int StackCooldownMs = 1000;
-    public const int MinHoldMs = 15000;
+    public const int MinHoldMs = 3000;
     public const int MaxHoldMs = 90000;
     public const int MaxStack = 1;
 
     public const int CloseBuyRevertFallback = 0;
     public const int CloseSellRevertFallback = 0;
-    public const double AReversalUsd = 0.80;
+    public const double AReversalUsd = 0.40;
 
     public const int FeedAStaleMs = 5000;
     public const int FeedBStaleMs = 3000;

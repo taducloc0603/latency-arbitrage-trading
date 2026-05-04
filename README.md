@@ -66,13 +66,13 @@ Neu ca Buy va Sell cung du dieu kien, tool chon ben manh hon theo do lech so voi
 
 ## Dieu kien dong lenh
 
-Lenh dang giu se khong dong theo revert/reversal truoc `15000ms`, tru khi bi emergency. Thoi gian giu toi da la `90000ms`.
+Lenh dang giu se khong dong theo revert/reversal truoc `3000ms`, tru khi bi emergency. Thoi gian giu toi da la `90000ms`.
 
 Dong `BuyB` khi mot trong cac dieu kien sau dung:
 
 - Feed A stale/invalid hoac bot vao `Emergency`: dong ngay tai `B.Bid`.
-- Da giu toi thieu `15000ms` va `A.Ask <= PeakAskA - 0.80`: dong tai `B.Bid`.
-- Da giu toi thieu `15000ms` va `GapBuy >= 0`: dong tai `B.Bid`.
+- Da giu toi thieu `3000ms` va `A.Ask <= PeakAskA - 0.40`: dong tai `B.Bid`.
+- Da giu toi thieu `3000ms` va `GapBuy >= 0`: dong tai `B.Bid`.
 - Da giu `>= 90000ms`: dong tai `B.Bid`.
 
 Live close chi duoc gui neu B trade map doc duoc, co it nhat mot lenh dang mo o row 0, va side cua row 0 khop voi side strategy can dong.
@@ -80,8 +80,8 @@ Live close chi duoc gui neu B trade map doc duoc, co it nhat mot lenh dang mo o 
 Dong `SellB` khi mot trong cac dieu kien sau dung:
 
 - Feed A stale/invalid hoac bot vao `Emergency`: dong ngay tai `B.Ask`.
-- Da giu toi thieu `15000ms` va `A.Bid >= TroughBidA + 0.80`: dong tai `B.Ask`.
-- Da giu toi thieu `15000ms` va `GapSell <= 0`: dong tai `B.Ask`.
+- Da giu toi thieu `3000ms` va `A.Bid >= TroughBidA + 0.40`: dong tai `B.Ask`.
+- Da giu toi thieu `3000ms` va `GapSell <= 0`: dong tai `B.Ask`.
 - Da giu `>= 90000ms`: dong tai `B.Ask`.
 
 ## Emergency va resume
@@ -109,10 +109,10 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 - `StackCooldownMs` (mac dinh `1000`): khoang thoi gian toi thieu giua 2 lan stack.
 - `LotBandOneMaxGap` / `LotBandTwoMaxGap` (mac dinh `60` / `70`): nguong `abs(gap)` de chia bands lot 8.0 / 7.0 / 5.0. Lot thuc te khi live duoc set san tren chart MT5, day chi anh huong PnL accounting noi bo dry run.
 - `ConfirmMs` (mac dinh `500`): thoi gian tin hieu phai duy tri lien tuc truoc khi mo lenh. Da nang tu `300ms` len `500ms` de filter brief spikes (gap nhay extreme nhung B kip catch up trong execution lag ~450ms cua UI-click). Sustained signal (kéo dai >500ms) la real arb thuc.
-- `MinHoldMs` / `MaxHoldMs` (mac dinh `15000` / `90000`): thoi gian giu lenh toi thieu va toi da.
+- `MinHoldMs` / `MaxHoldMs` (mac dinh `3000` / `90000`): thoi gian giu lenh toi thieu va toi da. Da giam tu `15000ms` xuong `3000ms` vi gap arb chi keo dai 1-2s; giu lau hon chi expose vao market drift, lam mat winning trades khi A trend nguoc lai.
 - `FixedOpenBuyFallback` / `FixedOpenSellFallback` (mac dinh `-80` / `60`): nguong open khi chua du `WarmupMinSamples` mau.
 - `CloseBuyRevertFallback` / `CloseSellRevertFallback` (mac dinh `0` / `0`): nguong gap revert de dong lenh.
-- `AReversalUsd` (mac dinh `0.80`): muc retrace cua A truoc khi chot.
+- `AReversalUsd` (mac dinh `0.40`): muc retrace cua A truoc khi chot. Da giam tu `$0.80` xuong `$0.40` de close som hon khi A bat dau dao chieu, han che loss khi market trend di nguoc.
 - `KStd` (mac dinh `3.0`): he so nhan std cho threshold dong sau warmup.
 - `FeedAStaleMs` / `FeedBStaleMs` (mac dinh `5000` / `3000`): thoi gian latency cho phep cho tung feed.
 - `SpreadBMaxMultiplier` (mac dinh `2.5`): bo qua tin hieu khi spread B vuot `MedianSpreadB * he so` nay.
