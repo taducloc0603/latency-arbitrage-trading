@@ -246,6 +246,12 @@ public sealed class DryRunClusterEngine
             return false;
         }
 
+        if (thresholds.ARangePoints < StrategyDefaults.MinAVolPoints)
+        {
+            events.Add(Block(snapshot, "A volatility low"));
+            return false;
+        }
+
         return true;
     }
 

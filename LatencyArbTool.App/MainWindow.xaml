@@ -111,6 +111,8 @@
                     <TextBlock Text="{Binding OpenSellThreshold}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Rolling samples" />
                     <TextBlock Text="{Binding SampleCount}" Style="{StaticResource ValueText}" />
+                    <TextBlock Text="A vol (60s pts)" />
+                    <TextBlock Text="{Binding AVolatility}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Threshold mode" />
                     <TextBlock Text="{Binding ThresholdMode}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Bot state" />

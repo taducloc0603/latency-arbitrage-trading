@@ -12,8 +12,8 @@ public sealed class LeadFollowSignalEngineTests
         var thresholds = Thresholds();
 
         Assert.Null(engine.Evaluate(Snapshot(0, gapBuy: -60, gapSell: 0), thresholds));
-        Assert.Null(engine.Evaluate(Snapshot(999, gapBuy: -60, gapSell: 0), thresholds));
-        Assert.Equal(SignalSide.BuyB, engine.Evaluate(Snapshot(1000, gapBuy: -60, gapSell: 0), thresholds));
+        Assert.Null(engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs - 1, gapBuy: -60, gapSell: 0), thresholds));
+        Assert.Equal(SignalSide.BuyB, engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs, gapBuy: -60, gapSell: 0), thresholds));
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public sealed class LeadFollowSignalEngineTests
         var thresholds = Thresholds();
 
         Assert.Null(engine.Evaluate(Snapshot(0, gapBuy: 0, gapSell: 40), thresholds));
-        Assert.Equal(SignalSide.SellB, engine.Evaluate(Snapshot(1000, gapBuy: 0, gapSell: 40), thresholds));
+        Assert.Equal(SignalSide.SellB, engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs, gapBuy: 0, gapSell: 40), thresholds));
     }
 
     [Fact]
@@ -33,8 +33,8 @@ public sealed class LeadFollowSignalEngineTests
         var thresholds = Thresholds();
 
         Assert.Null(engine.Evaluate(Snapshot(0, gapBuy: -60, gapSell: 0), thresholds));
-        Assert.Null(engine.Evaluate(Snapshot(500, gapBuy: -40, gapSell: 0), thresholds));
-        Assert.Null(engine.Evaluate(Snapshot(1200, gapBuy: -60, gapSell: 0), thresholds));
+        Assert.Null(engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs / 2, gapBuy: -40, gapSell: 0), thresholds));
+        Assert.Null(engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs + 200, gapBuy: -60, gapSell: 0), thresholds));
     }
 
     private static GapThresholds Thresholds()

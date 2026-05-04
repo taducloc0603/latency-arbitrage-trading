@@ -14,14 +14,16 @@ public sealed class RollingGapStats
 
     public int Count => _samples.Count;
 
-    public void Add(long timestampMs, int gapBuy, int gapSell, double spreadB)
+    public void Add(long timestampMs, int gapBuy, int gapSell, double spreadB, double midA = double.NaN)
     {
-        _samples.Enqueue(new GapSample(timestampMs, gapBuy, gapSell, spreadB));
+        _samples.Enqueue(new GapSample(timestampMs, gapBuy, gapSell, spreadB, midA));
         Trim(timestampMs);
     }
 
     public GapThresholds GetThresholds()
     {
+        var aRangePoints = ComputeARangePoints();
+
         if (_samples.Count < StrategyDefaults.WarmupMinSamples)
         {
             return new GapThresholds(
@@ -35,7 +37,8 @@ public sealed class RollingGapStats
                 0,
                 Median(_samples.Select(s => s.SpreadB)),
                 _samples.Count,
-                IsWarmup: true);
+                IsWarmup: true,
+                ARangePoints: aRangePoints);
         }
 
         var buys = _samples.Select(s => (double)s.GapBuy).ToArray();
@@ -56,7 +59,34 @@ public sealed class RollingGapStats
             stdSell,
             Median(_samples.Select(s => s.SpreadB)),
             _samples.Count,
-            IsWarmup: false);
+            IsWarmup: false,
+            ARangePoints: aRangePoints);
+    }
+
+    private int ComputeARangePoints()
+    {
+        if (_samples.Count == 0)
+        {
+            return int.MaxValue;
+        }
+
+        var latestTs = _samples.Last().TimestampMs;
+        var cutoff = latestTs - StrategyDefaults.AVolWindowMs;
+        double min = double.PositiveInfinity, max = double.NegativeInfinity;
+        foreach (var s in _samples)
+        {
+            if (s.TimestampMs < cutoff) continue;
+            if (double.IsNaN(s.MidA)) continue;
+            if (s.MidA < min) min = s.MidA;
+            if (s.MidA > max) max = s.MidA;
+        }
+
+        if (double.IsPositiveInfinity(min))
+        {
+            return int.MaxValue;
+        }
+
+        return (int)Math.Round((max - min) * StrategyDefaults.PointMultiplier, MidpointRounding.AwayFromZero);
     }
 
     private void Trim(long nowMs)
@@ -92,6 +122,6 @@ public sealed class RollingGapStats
         return Math.Sqrt(variance);
     }
 
-    private sealed record GapSample(long TimestampMs, int GapBuy, int GapSell, double SpreadB);
+    private sealed record GapSample(long TimestampMs, int GapBuy, int GapSell, double SpreadB, double MidA);
 }
 

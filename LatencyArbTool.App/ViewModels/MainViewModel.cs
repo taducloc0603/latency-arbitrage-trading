@@ -51,6 +51,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private int _openBuyThreshold = StrategyDefaults.FixedOpenBuyFallback;
     private int _openSellThreshold = StrategyDefaults.FixedOpenSellFallback;
     private int _sampleCount;
+    private string _aVolatility = "-";
     private string _thresholdMode = "Warmup";
     private string _botState = LatencyArbTool.Core.Models.BotState.Idle.ToString();
     private string _clusterSide = "-";
@@ -151,6 +152,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public int OpenBuyThreshold { get => _openBuyThreshold; private set => SetProperty(ref _openBuyThreshold, value); }
     public int OpenSellThreshold { get => _openSellThreshold; private set => SetProperty(ref _openSellThreshold, value); }
     public int SampleCount { get => _sampleCount; private set => SetProperty(ref _sampleCount, value); }
+    public string AVolatility { get => _aVolatility; private set => SetProperty(ref _aVolatility, value); }
     public string ThresholdMode { get => _thresholdMode; private set => SetProperty(ref _thresholdMode, value); }
     public string BotState { get => _botState; private set => SetProperty(ref _botState, value); }
     public string ClusterSide { get => _clusterSide; private set => SetProperty(ref _clusterSide, value); }
@@ -218,7 +220,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var (gapBuy, gapSell) = GapCalculator.Calculate(tickA.Tick, tickB.Tick);
         var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs);
 
-        _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread);
+        _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread, (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0);
         var thresholds = _stats.GetThresholds();
         var signal = _signalEngine.Evaluate(snapshot, thresholds);
         var events = _clusterEngine.Step(snapshot, thresholds, signal);
@@ -339,6 +341,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OpenBuyThreshold = thresholds.OpenBuy;
         OpenSellThreshold = thresholds.OpenSell;
         SampleCount = thresholds.SampleCount;
+        AVolatility = thresholds.ARangePoints == int.MaxValue ? "-" : thresholds.ARangePoints.ToString(CultureInfo.InvariantCulture);
         ThresholdMode = thresholds.IsWarmup ? "Warmup" : "Dynamic";
     }
 

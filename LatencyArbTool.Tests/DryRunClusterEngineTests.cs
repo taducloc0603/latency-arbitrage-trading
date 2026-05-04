@@ -53,7 +53,8 @@ public sealed class DryRunClusterEngineTests
         var engine = new DryRunClusterEngine();
         engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, askA: 101.0), Thresholds(), SignalSide.BuyB);
 
-        engine.Step(Snapshot(StrategyDefaults.MinHoldMs, gapBuy: -80, gapSell: 0, askA: 100.69), Thresholds(), null);
+        var reversedAsk = 101.0 - StrategyDefaults.AReversalUsd - 0.01;
+        engine.Step(Snapshot(StrategyDefaults.MinHoldMs, gapBuy: -80, gapSell: 0, askA: reversedAsk), Thresholds(), null);
 
         Assert.Equal(BotState.Idle, engine.State);
         Assert.Null(engine.CurrentCluster);
@@ -76,7 +77,8 @@ public sealed class DryRunClusterEngineTests
         var engine = new DryRunClusterEngine();
         engine.Step(Snapshot(0, gapBuy: 0, gapSell: 80, bidA: 100.0), Thresholds(), SignalSide.SellB);
 
-        engine.Step(Snapshot(StrategyDefaults.MinHoldMs, gapBuy: 0, gapSell: 80, bidA: 100.31), Thresholds(), null);
+        var reversedBid = 100.0 + StrategyDefaults.AReversalUsd + 0.01;
+        engine.Step(Snapshot(StrategyDefaults.MinHoldMs, gapBuy: 0, gapSell: 80, bidA: reversedBid), Thresholds(), null);
 
         Assert.Null(engine.CurrentCluster);
     }
@@ -161,6 +163,18 @@ public sealed class DryRunClusterEngineTests
 
         Assert.Null(engine.CurrentCluster);
         Assert.Contains(events, e => e.Decision == "guard block" && e.Reason == "spread B abnormal");
+    }
+
+    [Fact]
+    public void Step_LowAVolatilityBlocksOpen()
+    {
+        var engine = new DryRunClusterEngine();
+        var lowVolThresholds = Thresholds() with { ARangePoints = StrategyDefaults.MinAVolPoints - 1 };
+
+        var events = engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0), lowVolThresholds, SignalSide.BuyB);
+
+        Assert.Null(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "guard block" && e.Reason == "A volatility low");
     }
 
     private static GapThresholds Thresholds()

@@ -13,10 +13,36 @@ public sealed class RollingGapStatsTests
         var thresholds = stats.GetThresholds();
 
         Assert.True(thresholds.IsWarmup);
-        Assert.Equal(-50, thresholds.OpenBuy);
-        Assert.Equal(30, thresholds.OpenSell);
-        Assert.Equal(-15, thresholds.CloseBuyRevert);
-        Assert.Equal(20, thresholds.CloseSellRevert);
+        Assert.Equal(StrategyDefaults.FixedOpenBuyFallback, thresholds.OpenBuy);
+        Assert.Equal(StrategyDefaults.FixedOpenSellFallback, thresholds.OpenSell);
+        Assert.Equal(StrategyDefaults.CloseBuyRevertFallback, thresholds.CloseBuyRevert);
+        Assert.Equal(StrategyDefaults.CloseSellRevertFallback, thresholds.CloseSellRevert);
+    }
+
+    [Fact]
+    public void GetThresholds_ComputesARangeFromMidA()
+    {
+        var stats = new RollingGapStats();
+        stats.Add(0, -10, 10, 1, midA: 4675.20);
+        stats.Add(10_000, -10, 10, 1, midA: 4675.80);
+        stats.Add(50_000, -10, 10, 1, midA: 4675.10);
+
+        var thresholds = stats.GetThresholds();
+
+        Assert.Equal(70, thresholds.ARangePoints);
+    }
+
+    [Fact]
+    public void GetThresholds_ARangeIgnoresSamplesOutsideWindow()
+    {
+        var stats = new RollingGapStats();
+        stats.Add(0, -10, 10, 1, midA: 4670.00);
+        stats.Add(StrategyDefaults.AVolWindowMs + 1_000, -10, 10, 1, midA: 4675.00);
+        stats.Add(StrategyDefaults.AVolWindowMs + 2_000, -10, 10, 1, midA: 4675.20);
+
+        var thresholds = stats.GetThresholds();
+
+        Assert.Equal(20, thresholds.ARangePoints);
     }
 
     [Fact]
