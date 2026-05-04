@@ -7,7 +7,7 @@ namespace LatencyArbTool.Tests;
 
 public sealed class SimulationTests
 {
-    private const string DataDir = "/Users/admin/self/latency-arbitrage-trading/data/tick";
+    private static readonly string? DataDir = ResolveDataDir();
 
     private readonly ITestOutputHelper _out;
 
@@ -22,8 +22,19 @@ public sealed class SimulationTests
     [InlineData("20260504_120733_286")]
     public void Simulate(string runId)
     {
+        if (DataDir is null)
+        {
+            _out.WriteLine($"Skipping {runId}: tick data directory not found near repo root");
+            return;
+        }
+
         var aPath = Path.Combine(DataDir, $"{runId}_tickA.csv");
         var bPath = Path.Combine(DataDir, $"{runId}_tickB.csv");
+        if (!File.Exists(aPath) || !File.Exists(bPath))
+        {
+            _out.WriteLine($"Skipping {runId}: tick CSVs not present in {DataDir}");
+            return;
+        }
 
         var ticksA = LoadTicks(aPath);
         var ticksB = LoadTicks(bPath);
@@ -101,6 +112,18 @@ public sealed class SimulationTests
             var openPrice = o?.OpenPrice ?? 0;
             _out.WriteLine($"  #{i + 1} {side} open={openPrice:F2} close={c.ClosePrice:F2} hold={c.HoldMs}ms pnl={c.PnlRaw:+0.00;-0.00} reason={c.Reason}");
         }
+    }
+
+    private static string? ResolveDataDir()
+    {
+        var dir = AppContext.BaseDirectory;
+        for (var i = 0; i < 8 && dir is not null; i++)
+        {
+            var candidate = Path.Combine(dir, "data", "tick");
+            if (Directory.Exists(candidate)) return candidate;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return null;
     }
 
     private static List<(long ms, TickRecord tick)> LoadTicks(string path)
