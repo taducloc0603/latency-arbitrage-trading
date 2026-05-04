@@ -8,10 +8,12 @@ public static class StrategyDefaults
     public const double KStd = 3.0;
 
     public const int WarmupMinSamples = 500;
-    public const int FixedOpenBuyFallback = -80;
-    public const int FixedOpenSellFallback = 60;
+    public const int FixedOpenBuyFallback = -50;
+    public const int FixedOpenSellFallback = 35;
 
-    public const int ConfirmMs = 500;
+    public const int ConfirmMs = 350;
+    public const int ReCheckMs = 150;
+    public const double StabilityRatio = 0.70;
     public const int StackCooldownMs = 1000;
     public const int MinHoldMs = 3000;
     public const int MaxHoldMs = 90000;

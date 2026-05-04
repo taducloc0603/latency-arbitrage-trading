@@ -20,12 +20,12 @@ Tai lieu nay ghi lai cac thong so va dieu kien dong/mo lenh hien tai cua tool.
 - Rolling window: `5` phut.
 - Can toi thieu `500` samples de dung nguong dong.
 - Khi chua du `500` samples:
-  - `OpenBuyThreshold = -80`
-  - `OpenSellThreshold = 60`
+  - `OpenBuyThreshold = -50`
+  - `OpenSellThreshold = 35`
 - Khi du samples:
-  - `OpenBuyThreshold = min(median(GapBuy) - 3.0 * std(GapBuy), -80)`
-  - `OpenSellThreshold = max(median(GapSell) + 3.0 * std(GapSell), 60)`
-  - Dynamic chi duoc dung khi extreme hon fallback. Neu market calm khien `median ± 3*std` chua du extreme, bot van dung `-80 / +60` lam san. Tranh viec mo lenh tren noise nho khi market it bien dong.
+  - `OpenBuyThreshold = min(median(GapBuy) - 3.0 * std(GapBuy), -50)`
+  - `OpenSellThreshold = max(median(GapSell) + 3.0 * std(GapSell), 35)`
+  - Dynamic chi duoc dung khi extreme hon fallback. Neu market calm khien `median ± 3*std` chua du extreme, bot van dung `-50 / +35` lam san. Tranh viec mo lenh tren noise nho khi market it bien dong.
 - Nguong dong co dinh:
   - `CloseBuyRevert = 0`
   - `CloseSellRevert = 0`
@@ -45,17 +45,20 @@ Tool chi mo lenh moi khi:
 - Feed B khong stale.
 - Spread B khong bat thuong.
 - A volatility (range 60s) khong qua thap (`>= 50` points).
-- Tin hieu duoc xac nhan lien tuc toi thieu `500ms`.
+- Tin hieu duoc xac nhan theo 2 phase:
+  - Phase 1 (Confirm): gap phai duoi/tren threshold lien tuc toi thieu `350ms`.
+  - Phase 2 (Re-check): sau Confirm, cho them `150ms`. Trong suot 2 phase, gap khong duoc roi khoi vung threshold.
+  - Phase 3 (Stability): cuoi Re-check, kiem tra gap hien tai phai con >= `70%` cua peak gap quan sat duoc trong 2 phase. Filter cac signal "qua dinh" (peak roi nhung dang revert), chi giu signal sustained.
 - B trade map phai doc duoc va khong co lenh B dang mo; neu khong verify duoc thi live open bi chan.
 
 Mo `BuyB` khi:
 
-- `GapBuy <= OpenBuyThreshold` lien tuc toi thieu `500ms`.
+- `GapBuy <= OpenBuyThreshold` lien tuc qua Confirm + Re-check (`350+150=500ms`) va stability check pass (current >= 70% peak).
 - Gia mo lenh la `B.Ask`.
 
 Mo `SellB` khi:
 
-- `GapSell >= OpenSellThreshold` lien tuc toi thieu `500ms`.
+- `GapSell >= OpenSellThreshold` lien tuc qua Confirm + Re-check (`350+150=500ms`) va stability check pass.
 - Gia mo lenh la `B.Bid`.
 
 Neu ca Buy va Sell cung du dieu kien, tool chon ben manh hon theo do lech so voi median/std:
@@ -108,9 +111,11 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 - `MaxStack` (mac dinh `1`): so order toi da trong 1 cluster. Tang len `2` hoac `3` khi muon stack nhieu lenh tren cung tin hieu (sau cooldown va gap van extreme).
 - `StackCooldownMs` (mac dinh `1000`): khoang thoi gian toi thieu giua 2 lan stack.
 - `LotBandOneMaxGap` / `LotBandTwoMaxGap` (mac dinh `60` / `70`): nguong `abs(gap)` de chia bands lot 8.0 / 7.0 / 5.0. Lot thuc te khi live duoc set san tren chart MT5, day chi anh huong PnL accounting noi bo dry run.
-- `ConfirmMs` (mac dinh `500`): thoi gian tin hieu phai duy tri lien tuc truoc khi mo lenh. Da nang tu `300ms` len `500ms` de filter brief spikes (gap nhay extreme nhung B kip catch up trong execution lag ~450ms cua UI-click). Sustained signal (kéo dai >500ms) la real arb thuc.
+- `ConfirmMs` (mac dinh `350`): Phase 1 - thoi gian tin hieu phai duy tri lien tuc truoc khi vao Phase Re-check.
+- `ReCheckMs` (mac dinh `150`): Phase 2 - sau khi Confirm dat, cho them khoang nay roi moi danh gia stability. Tong cong `ConfirmMs + ReCheckMs = 500ms` truoc khi fire signal.
+- `StabilityRatio` (mac dinh `0.70`): Phase 3 - tai cuoi Re-check, gap hien tai phai >= `StabilityRatio * |peakGap|` (peak observed trong toan bo confirm + recheck window). Vi du peak=-100 va StabilityRatio=0.7 thi current phai <= -70 moi fire. Filter signal "dinh-roi-revert" — gap nhay extreme nhung dang catch up.
 - `MinHoldMs` / `MaxHoldMs` (mac dinh `3000` / `90000`): thoi gian giu lenh toi thieu va toi da. Da giam tu `15000ms` xuong `3000ms` vi gap arb chi keo dai 1-2s; giu lau hon chi expose vao market drift, lam mat winning trades khi A trend nguoc lai.
-- `FixedOpenBuyFallback` / `FixedOpenSellFallback` (mac dinh `-80` / `60`): nguong open khi chua du `WarmupMinSamples` mau.
+- `FixedOpenBuyFallback` / `FixedOpenSellFallback` (mac dinh `-50` / `35`): nguong open khi chua du `WarmupMinSamples` mau.
 - `CloseBuyRevertFallback` / `CloseSellRevertFallback` (mac dinh `0` / `0`): nguong gap revert de dong lenh.
 - `AReversalUsd` (mac dinh `0.40`): muc retrace cua A truoc khi chot. Da giam tu `$0.80` xuong `$0.40` de close som hon khi A bat dau dao chieu, han che loss khi market trend di nguoc.
 - `KStd` (mac dinh `3.0`): he so nhan std cho threshold dong sau warmup.

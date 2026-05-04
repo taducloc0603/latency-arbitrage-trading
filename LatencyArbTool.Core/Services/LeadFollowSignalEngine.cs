@@ -6,6 +6,10 @@ public sealed class LeadFollowSignalEngine
 {
     private long? _extremeSinceBuyMs;
     private long? _extremeSinceSellMs;
+    private long? _confirmReachedAtBuyMs;
+    private long? _confirmReachedAtSellMs;
+    private int? _peakGapBuy;
+    private int? _peakGapSell;
 
     public SignalSide? Evaluate(MarketSnapshot snapshot, GapThresholds thresholds)
     {
@@ -25,6 +29,10 @@ public sealed class LeadFollowSignalEngine
     {
         _extremeSinceBuyMs = null;
         _extremeSinceSellMs = null;
+        _confirmReachedAtBuyMs = null;
+        _confirmReachedAtSellMs = null;
+        _peakGapBuy = null;
+        _peakGapSell = null;
     }
 
     private bool UpdateBuy(MarketSnapshot snapshot, GapThresholds thresholds)
@@ -32,11 +40,27 @@ public sealed class LeadFollowSignalEngine
         if (snapshot.GapBuy > thresholds.OpenBuy)
         {
             _extremeSinceBuyMs = null;
+            _confirmReachedAtBuyMs = null;
+            _peakGapBuy = null;
             return false;
         }
 
         _extremeSinceBuyMs ??= snapshot.NowMs;
-        return snapshot.NowMs - _extremeSinceBuyMs.Value >= StrategyDefaults.ConfirmMs;
+        _peakGapBuy = _peakGapBuy.HasValue ? Math.Min(_peakGapBuy.Value, snapshot.GapBuy) : snapshot.GapBuy;
+
+        if (snapshot.NowMs - _extremeSinceBuyMs.Value < StrategyDefaults.ConfirmMs)
+        {
+            return false;
+        }
+
+        _confirmReachedAtBuyMs ??= snapshot.NowMs;
+
+        if (snapshot.NowMs - _confirmReachedAtBuyMs.Value < StrategyDefaults.ReCheckMs)
+        {
+            return false;
+        }
+
+        return IsStable(snapshot.GapBuy, _peakGapBuy.Value);
     }
 
     private bool UpdateSell(MarketSnapshot snapshot, GapThresholds thresholds)
@@ -44,11 +68,39 @@ public sealed class LeadFollowSignalEngine
         if (snapshot.GapSell < thresholds.OpenSell)
         {
             _extremeSinceSellMs = null;
+            _confirmReachedAtSellMs = null;
+            _peakGapSell = null;
             return false;
         }
 
         _extremeSinceSellMs ??= snapshot.NowMs;
-        return snapshot.NowMs - _extremeSinceSellMs.Value >= StrategyDefaults.ConfirmMs;
+        _peakGapSell = _peakGapSell.HasValue ? Math.Max(_peakGapSell.Value, snapshot.GapSell) : snapshot.GapSell;
+
+        if (snapshot.NowMs - _extremeSinceSellMs.Value < StrategyDefaults.ConfirmMs)
+        {
+            return false;
+        }
+
+        _confirmReachedAtSellMs ??= snapshot.NowMs;
+
+        if (snapshot.NowMs - _confirmReachedAtSellMs.Value < StrategyDefaults.ReCheckMs)
+        {
+            return false;
+        }
+
+        return IsStable(snapshot.GapSell, _peakGapSell.Value);
+    }
+
+    private static bool IsStable(int currentGap, int peakGap)
+    {
+        var peakAbs = Math.Abs(peakGap);
+        if (peakAbs == 0)
+        {
+            return true;
+        }
+
+        var currentAbs = Math.Abs(currentGap);
+        return currentAbs >= peakAbs * StrategyDefaults.StabilityRatio;
     }
 
     private static SignalSide StrongerSide(MarketSnapshot snapshot, GapThresholds thresholds)
@@ -65,4 +117,3 @@ public sealed class LeadFollowSignalEngine
             : Math.Abs(value - median) / std;
     }
 }
-
