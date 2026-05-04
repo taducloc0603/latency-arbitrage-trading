@@ -45,17 +45,17 @@ Tool chi mo lenh moi khi:
 - Feed B khong stale.
 - Spread B khong bat thuong.
 - A volatility (range 60s) khong qua thap (`>= 50` points).
-- Tin hieu duoc xac nhan lien tuc toi thieu `300ms`.
+- Tin hieu duoc xac nhan lien tuc toi thieu `500ms`.
 - B trade map phai doc duoc va khong co lenh B dang mo; neu khong verify duoc thi live open bi chan.
 
 Mo `BuyB` khi:
 
-- `GapBuy <= OpenBuyThreshold` lien tuc toi thieu `300ms`.
+- `GapBuy <= OpenBuyThreshold` lien tuc toi thieu `500ms`.
 - Gia mo lenh la `B.Ask`.
 
 Mo `SellB` khi:
 
-- `GapSell >= OpenSellThreshold` lien tuc toi thieu `300ms`.
+- `GapSell >= OpenSellThreshold` lien tuc toi thieu `500ms`.
 - Gia mo lenh la `B.Bid`.
 
 Neu ca Buy va Sell cung du dieu kien, tool chon ben manh hon theo do lech so voi median/std:
@@ -108,7 +108,7 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 - `MaxStack` (mac dinh `1`): so order toi da trong 1 cluster. Tang len `2` hoac `3` khi muon stack nhieu lenh tren cung tin hieu (sau cooldown va gap van extreme).
 - `StackCooldownMs` (mac dinh `1000`): khoang thoi gian toi thieu giua 2 lan stack.
 - `LotBandOneMaxGap` / `LotBandTwoMaxGap` (mac dinh `60` / `70`): nguong `abs(gap)` de chia bands lot 8.0 / 7.0 / 5.0. Lot thuc te khi live duoc set san tren chart MT5, day chi anh huong PnL accounting noi bo dry run.
-- `ConfirmMs` (mac dinh `300`): thoi gian tin hieu phai duy tri lien tuc truoc khi mo lenh.
+- `ConfirmMs` (mac dinh `500`): thoi gian tin hieu phai duy tri lien tuc truoc khi mo lenh. Da nang tu `300ms` len `500ms` de filter brief spikes (gap nhay extreme nhung B kip catch up trong execution lag ~450ms cua UI-click). Sustained signal (kéo dai >500ms) la real arb thuc.
 - `MinHoldMs` / `MaxHoldMs` (mac dinh `15000` / `90000`): thoi gian giu lenh toi thieu va toi da.
 - `FixedOpenBuyFallback` / `FixedOpenSellFallback` (mac dinh `-80` / `60`): nguong open khi chua du `WarmupMinSamples` mau.
 - `CloseBuyRevertFallback` / `CloseSellRevertFallback` (mac dinh `0` / `0`): nguong gap revert de dong lenh.
@@ -119,21 +119,3 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 - `AVolWindowMs` / `MinAVolPoints` (mac dinh `60000` / `50`): cua so do volatility cua A va nguong toi thieu.
 
 Sau khi sua, build lai (`dotnet build`) va chay tests (`dotnet test LatencyArbTool.Tests/LatencyArbTool.Tests.csproj`) de chac chan khong vo logic.
-
-## Vi du tu anh chup
-
-Voi thong so:
-
-- `GapBuy = -27`
-- `GapSell = 17`
-- `OpenBuyThreshold = -78`
-- `OpenSellThreshold = 68`
-- `Bot state = Emergency`
-- `Latency = unknown`
-
-Ket luan:
-
-- Chua the mo `BuyB` vi `-27` chua `<= -78`.
-- Chua the mo `SellB` vi `17` chua `>= 68`.
-- Bot dang `Emergency`, nen khong mo lenh moi.
-- `Latency unknown` lam feed bi xem la invalid/stale.

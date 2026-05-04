@@ -11,7 +11,7 @@ public static class StrategyDefaults
     public const int FixedOpenBuyFallback = -80;
     public const int FixedOpenSellFallback = 60;
 
-    public const int ConfirmMs = 300;
+    public const int ConfirmMs = 500;
     public const int StackCooldownMs = 1000;
     public const int MinHoldMs = 15000;
     public const int MaxHoldMs = 90000;
