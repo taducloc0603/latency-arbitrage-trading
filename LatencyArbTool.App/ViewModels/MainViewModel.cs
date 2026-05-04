@@ -203,11 +203,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void Poll()
     {
-        var nowTickCountMs = Environment.TickCount64;
-        UpdateBPositionMaps(nowTickCountMs);
+        UpdateBPositionMaps(Environment.TickCount64);
 
         var tickA = _reader.TryRead(MapNameA);
         var tickB = _reader.TryRead(MapNameB);
+        var nowTickCountMs = Environment.TickCount64;
         StatusA = tickA.Success ? "Connected" : $"Disconnected: {tickA.Error}";
         StatusB = tickB.Success ? "Connected" : $"Disconnected: {tickB.Error}";
 

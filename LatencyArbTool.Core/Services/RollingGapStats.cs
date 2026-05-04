@@ -48,9 +48,12 @@ public sealed class RollingGapStats
         var stdBuy = StdDev(buys, medianBuy);
         var stdSell = StdDev(sells, medianSell);
 
+        var dynamicBuy = (int)Math.Round(medianBuy - StrategyDefaults.KStd * stdBuy, MidpointRounding.AwayFromZero);
+        var dynamicSell = (int)Math.Round(medianSell + StrategyDefaults.KStd * stdSell, MidpointRounding.AwayFromZero);
+
         return new GapThresholds(
-            (int)Math.Round(medianBuy - StrategyDefaults.KStd * stdBuy, MidpointRounding.AwayFromZero),
-            (int)Math.Round(medianSell + StrategyDefaults.KStd * stdSell, MidpointRounding.AwayFromZero),
+            Math.Min(dynamicBuy, StrategyDefaults.FixedOpenBuyFallback),
+            Math.Max(dynamicSell, StrategyDefaults.FixedOpenSellFallback),
             StrategyDefaults.CloseBuyRevertFallback,
             StrategyDefaults.CloseSellRevertFallback,
             medianBuy,

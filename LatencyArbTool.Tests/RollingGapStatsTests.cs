@@ -46,7 +46,24 @@ public sealed class RollingGapStatsTests
     }
 
     [Fact]
-    public void GetThresholds_SwitchesToDynamicAfterWarmup()
+    public void GetThresholds_SwitchesToDynamicAfterWarmup_WhenMoreExtremeThanFallback()
+    {
+        var stats = new RollingGapStats();
+        for (var i = 0; i < StrategyDefaults.WarmupMinSamples; i++)
+        {
+            stats.Add(i, i % 2 == 0 ? -100 : -50, i % 2 == 0 ? 100 : 50, 1);
+        }
+
+        var thresholds = stats.GetThresholds();
+
+        Assert.False(thresholds.IsWarmup);
+        Assert.Equal(StrategyDefaults.WarmupMinSamples, thresholds.SampleCount);
+        Assert.True(thresholds.OpenBuy < StrategyDefaults.FixedOpenBuyFallback);
+        Assert.True(thresholds.OpenSell > StrategyDefaults.FixedOpenSellFallback);
+    }
+
+    [Fact]
+    public void GetThresholds_ClampsToFallbackWhenDynamicTooLenient()
     {
         var stats = new RollingGapStats();
         for (var i = 0; i < StrategyDefaults.WarmupMinSamples; i++)
@@ -57,9 +74,8 @@ public sealed class RollingGapStatsTests
         var thresholds = stats.GetThresholds();
 
         Assert.False(thresholds.IsWarmup);
-        Assert.Equal(StrategyDefaults.WarmupMinSamples, thresholds.SampleCount);
-        Assert.NotEqual(StrategyDefaults.FixedOpenBuyFallback, thresholds.OpenBuy);
-        Assert.NotEqual(StrategyDefaults.FixedOpenSellFallback, thresholds.OpenSell);
+        Assert.Equal(StrategyDefaults.FixedOpenBuyFallback, thresholds.OpenBuy);
+        Assert.Equal(StrategyDefaults.FixedOpenSellFallback, thresholds.OpenSell);
     }
 }
 

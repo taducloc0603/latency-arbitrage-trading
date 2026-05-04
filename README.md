@@ -23,8 +23,9 @@ Tai lieu nay ghi lai cac thong so va dieu kien dong/mo lenh hien tai cua tool.
   - `OpenBuyThreshold = -80`
   - `OpenSellThreshold = 60`
 - Khi du samples:
-  - `OpenBuyThreshold = median(GapBuy) - 3.0 * std(GapBuy)`
-  - `OpenSellThreshold = median(GapSell) + 3.0 * std(GapSell)`
+  - `OpenBuyThreshold = min(median(GapBuy) - 3.0 * std(GapBuy), -80)`
+  - `OpenSellThreshold = max(median(GapSell) + 3.0 * std(GapSell), 60)`
+  - Dynamic chi duoc dung khi extreme hon fallback. Neu market calm khien `median ± 3*std` chua du extreme, bot van dung `-80 / +60` lam san. Tranh viec mo lenh tren noise nho khi market it bien dong.
 - Nguong dong co dinh:
   - `CloseBuyRevert = 0`
   - `CloseSellRevert = 0`
