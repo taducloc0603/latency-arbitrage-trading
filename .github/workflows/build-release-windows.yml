@@ -57,7 +57,14 @@ jobs:
         run: dotnet build ${{ env.SOLUTION }} -c Release --no-restore -p:Platform="Any CPU"
 
       - name: Run tests
-        run: dotnet test ${{ env.TEST_PROJECT }} -c Release --no-restore -p:Platform="Any CPU" --verbosity normal
+        run: dotnet test ${{ env.TEST_PROJECT }} -c Release --no-restore -p:Platform="Any CPU" --logger "console;verbosity=detailed" --logger "trx;LogFileName=test_results.trx" --results-directory test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/**/*.trx
 
       - name: Build native mt5engine C API DLL (x64)
         shell: cmd
