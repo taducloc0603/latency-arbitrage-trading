@@ -10,7 +10,7 @@ Trinh tu xac nhan tin hieu chia 3 phase de loc cac brief spike (gap nhay extreme
 
 1. **Confirm** (`350ms`): gap phai vuot threshold lien tuc.
 2. **Re-check** (`150ms`): tiep tuc giu threshold them; tong wait `500ms`.
-3. **Stability** (cuoi Re-check): gap hien tai phai >= `70%` cua peak quan sat trong toan bo window. Loc cac signal "qua dinh roi revert".
+3. **Stability** (cuoi Re-check): gap hien tai phai >= `40%` cua peak quan sat trong toan bo window. Loc cac signal qua dinh roi revert manh, nhung van cho phep cac sustained signal voi peak cao moderate.
 
 Sau khi mo, MinHoldMs ngan (`3000ms`) + AReversalUsd thap (`$0.40`) cho phep dong som ngay khi A dao chieu, tranh expose voi market drift trong khi giu lenh.
 
@@ -115,7 +115,7 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 
 - `ConfirmMs` (`350`): Phase 1 - gap phai vuot threshold lien tuc bao lau truoc khi vao re-check.
 - `ReCheckMs` (`150`): Phase 2 - sau confirm, cho them bao lau roi moi danh gia stability.
-- `StabilityRatio` (`0.70`): Phase 3 - cuoi re-check, `|currentGap|` phai >= ratio nay nhan voi `|peakGap|` quan sat trong window. Tang len `0.80` de chat hon, giam xuong `0.60` de fire nhieu hon.
+- `StabilityRatio` (`0.40`): Phase 3 - cuoi re-check, `|currentGap|` phai >= ratio nay nhan voi `|peakGap|` quan sat trong window. Da giam tu `0.70` xuong `0.40` sau Step 2 diagnostic: 0.70 qua chat, filter ca cac signal sustained voi peak cao roi revert ve gan threshold (run 6 fired 0/15 trade voi 0.70). 0.40 cho phep gap revert toi 60% tu peak van fire — sim cho thay tang trade va PnL tot hon tren multiple run.
 
 ### Threshold
 

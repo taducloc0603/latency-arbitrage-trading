@@ -21,6 +21,7 @@ public sealed class SimulationTests
     [InlineData("20260504_034135_243")]
     [InlineData("20260504_120733_286")]
     [InlineData("20260504_114822_008")]
+    [InlineData("20260505_023742_297")]
     public void Simulate(string runId)
     {
         if (DataDir is null)
@@ -55,11 +56,27 @@ public sealed class SimulationTests
         var opens = new List<DryRunEvent>();
         var closes = new List<DryRunEvent>();
         var blocks = new Dictionary<string, int>();
+        var openContexts = new List<OpenContext>();
+
+        // Diagnostic tracking
+        var bIntervals = new List<long>();
+        long? lastBMs = null;
+        // Rolling history of recent gap samples for trade context lookup
+        var history = new LinkedList<GapSample>();
+        const int historyWindowMs = 2000;
 
         foreach (var (ms, side, tick) in events)
         {
-            if (side == 'A') curA = tick with { EaTickCountMs = ms };
-            else curB = tick with { EaTickCountMs = ms };
+            if (side == 'A')
+            {
+                curA = tick with { EaTickCountMs = ms };
+            }
+            else
+            {
+                curB = tick with { EaTickCountMs = ms };
+                if (lastBMs is not null) bIntervals.Add(ms - lastBMs.Value);
+                lastBMs = ms;
+            }
 
             if (curA is null || curB is null) continue;
 
@@ -70,9 +87,19 @@ public sealed class SimulationTests
             var signal = signalEngine.Evaluate(snapshot, thresholds);
             var stepEvents = clusterEngine.Step(snapshot, thresholds, signal);
 
+            history.AddLast(new GapSample(ms, gapBuy, gapSell, curB.Spread));
+            while (history.First is not null && ms - history.First.Value.Ms > historyWindowMs)
+            {
+                history.RemoveFirst();
+            }
+
             foreach (var ev in stepEvents)
             {
-                if (ev.Decision == "live open") opens.Add(ev);
+                if (ev.Decision == "live open")
+                {
+                    opens.Add(ev);
+                    openContexts.Add(BuildOpenContext(ev, ms, gapBuy, gapSell, history, thresholds));
+                }
                 else if (ev.Decision == "live close") closes.Add(ev);
                 else if (ev.Decision == "guard block")
                 {
@@ -87,7 +114,7 @@ public sealed class SimulationTests
         var losses = closes.Count(c => c.PnlRaw < 0);
 
         _out.WriteLine($"=== Run {runId} ===");
-        _out.WriteLine($"Tick events: A={ticksA.Count}, B={ticksB.Count}");
+        _out.WriteLine($"Tick events: A={ticksA.Count}, B={ticksB.Count}, ratio A/B = {(double)ticksA.Count / Math.Max(1, ticksB.Count):F2}x");
         _out.WriteLine($"Opens: {opens.Count}, Closes: {closes.Count}");
         _out.WriteLine($"Wins: {wins}, Losses: {losses}, Win rate: {(wins + losses > 0 ? 100.0 * wins / (wins + losses) : 0):F1}%");
         _out.WriteLine($"Total PnL (raw, sim units): {totalPnl:F2}");
@@ -98,21 +125,91 @@ public sealed class SimulationTests
             _out.WriteLine($"Largest win: {closes.Max(c => c.PnlRaw):F2}");
             _out.WriteLine($"Largest loss: {closes.Min(c => c.PnlRaw):F2}");
         }
-        _out.WriteLine("Blocks by reason:");
-        foreach (var kv in blocks.OrderByDescending(k => k.Value))
+
+        // B tick interval distribution
+        if (bIntervals.Count > 0)
+        {
+            bIntervals.Sort();
+            var med = bIntervals[bIntervals.Count / 2];
+            var p95 = bIntervals[(int)(bIntervals.Count * 0.95)];
+            var p99 = bIntervals[(int)(bIntervals.Count * 0.99)];
+            var stallCount1s = bIntervals.Count(x => x > 1000);
+            var stallCount2s = bIntervals.Count(x => x > 2000);
+            var stallCount5s = bIntervals.Count(x => x > 5000);
+            _out.WriteLine("");
+            _out.WriteLine("B tick interval (ms):");
+            _out.WriteLine($"  median={med}, p95={p95}, p99={p99}, max={bIntervals[^1]}");
+            _out.WriteLine($"  count >1s: {stallCount1s}, >2s: {stallCount2s}, >5s: {stallCount5s}");
+        }
+
+        _out.WriteLine("");
+        _out.WriteLine("Blocks by reason (top 10):");
+        foreach (var kv in blocks.OrderByDescending(k => k.Value).Take(10))
         {
             _out.WriteLine($"  {kv.Key}: {kv.Value}");
         }
+
         _out.WriteLine("");
-        _out.WriteLine("Trade detail:");
+        _out.WriteLine("Trade detail (with pre-open context):");
         for (var i = 0; i < closes.Count; i++)
         {
             var c = closes[i];
             var o = i < opens.Count ? opens[i] : null;
+            var ctx = i < openContexts.Count ? openContexts[i] : null;
             var side = c.Side?.ToString() ?? "?";
             var openPrice = o?.OpenPrice ?? 0;
             _out.WriteLine($"  #{i + 1} {side} open={openPrice:F2} close={c.ClosePrice:F2} hold={c.HoldMs}ms pnl={c.PnlRaw:+0.00;-0.00} reason={c.Reason}");
+            if (ctx is not null)
+            {
+                _out.WriteLine($"     gap@open: buy={ctx.GapBuyAtOpen}, sell={ctx.GapSellAtOpen}");
+                _out.WriteLine($"     thresholds: openBuy={ctx.OpenBuy}, openSell={ctx.OpenSell}");
+                _out.WriteLine($"     1500ms window: peakBuy={ctx.PeakBuy}, peakSell={ctx.PeakSell}, troughBuy={ctx.TroughBuy}, troughSell={ctx.TroughSell}");
+                _out.WriteLine($"     samples in window: {ctx.WindowSamples}, B updates in window: {ctx.BUpdatesInWindow}");
+            }
         }
+    }
+
+    private static OpenContext BuildOpenContext(
+        DryRunEvent openEvent,
+        long openMs,
+        int gapBuyAtOpen,
+        int gapSellAtOpen,
+        LinkedList<GapSample> history,
+        GapThresholds thresholds)
+    {
+        const int contextWindowMs = 1500;
+        var cutoff = openMs - contextWindowMs;
+        int peakBuy = gapBuyAtOpen, troughBuy = gapBuyAtOpen;
+        int peakSell = gapSellAtOpen, troughSell = gapSellAtOpen;
+        int samples = 0;
+        int bUpdates = 0;
+        double? lastSpreadB = null;
+        foreach (var s in history)
+        {
+            if (s.Ms < cutoff) continue;
+            samples++;
+            if (s.GapBuy < peakBuy) peakBuy = s.GapBuy;
+            if (s.GapBuy > troughBuy) troughBuy = s.GapBuy;
+            if (s.GapSell > peakSell) peakSell = s.GapSell;
+            if (s.GapSell < troughSell) troughSell = s.GapSell;
+            if (lastSpreadB is null || Math.Abs(s.SpreadB - lastSpreadB.Value) > 1e-9)
+            {
+                bUpdates++;
+                lastSpreadB = s.SpreadB;
+            }
+        }
+        return new OpenContext(
+            openEvent.ClusterId ?? 0,
+            gapBuyAtOpen,
+            gapSellAtOpen,
+            thresholds.OpenBuy,
+            thresholds.OpenSell,
+            peakBuy,
+            peakSell,
+            troughBuy,
+            troughSell,
+            samples,
+            bUpdates);
     }
 
     private static string? ResolveDataDir()
@@ -146,4 +243,19 @@ public sealed class SimulationTests
         }
         return result;
     }
+
+    private sealed record GapSample(long Ms, int GapBuy, int GapSell, double SpreadB);
+
+    private sealed record OpenContext(
+        long ClusterId,
+        int GapBuyAtOpen,
+        int GapSellAtOpen,
+        int OpenBuy,
+        int OpenSell,
+        int PeakBuy,
+        int PeakSell,
+        int TroughBuy,
+        int TroughSell,
+        int WindowSamples,
+        int BUpdatesInWindow);
 }

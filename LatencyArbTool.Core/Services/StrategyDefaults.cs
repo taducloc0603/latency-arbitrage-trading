@@ -13,7 +13,7 @@ public static class StrategyDefaults
 
     public const int ConfirmMs = 350;
     public const int ReCheckMs = 150;
-    public const double StabilityRatio = 0.70;
+    public const double StabilityRatio = 0.40;
     public const int StackCooldownMs = 1000;
     public const int MinHoldMs = 3000;
     public const int MaxHoldMs = 90000;
