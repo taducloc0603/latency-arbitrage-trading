@@ -20,6 +20,7 @@ public sealed class SimulationTests
     [InlineData("20260504_002742_265")]
     [InlineData("20260504_034135_243")]
     [InlineData("20260504_120733_286")]
+    [InlineData("20260504_114822_008")]
     public void Simulate(string runId)
     {
         if (DataDir is null)
