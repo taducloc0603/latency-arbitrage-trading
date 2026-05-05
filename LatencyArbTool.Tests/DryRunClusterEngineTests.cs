@@ -121,7 +121,7 @@ public sealed class DryRunClusterEngineTests
     {
         var engine = new DryRunClusterEngine();
 
-        var events = engine.Step(Snapshot(10_000, gapBuy: -80, gapSell: 0, tickAOffsetMs: -6000), Thresholds(), SignalSide.BuyB);
+        var events = engine.Step(Snapshot(10_000, gapBuy: -80, gapSell: 0, feedASilenceMs: StrategyDefaults.FeedAStaleMs + 1000), Thresholds(), SignalSide.BuyB);
 
         Assert.Equal(BotState.Emergency, engine.State);
         Assert.Contains(events, e => e.Decision == "emergency");
@@ -132,7 +132,7 @@ public sealed class DryRunClusterEngineTests
     {
         var engine = new DryRunClusterEngine();
 
-        var events = engine.Step(Snapshot(10_000, gapBuy: -80, gapSell: 0, tickBOffsetMs: -4000), Thresholds(), SignalSide.BuyB);
+        var events = engine.Step(Snapshot(10_000, gapBuy: -80, gapSell: 0, feedBSilenceMs: StrategyDefaults.FeedBStaleMs + 1000), Thresholds(), SignalSide.BuyB);
 
         Assert.Equal(BotState.Idle, engine.State);
         Assert.Null(engine.CurrentCluster);
@@ -191,15 +191,15 @@ public sealed class DryRunClusterEngineTests
         double bidB = 100,
         double askB = 101,
         double spreadB = 1,
-        long tickAOffsetMs = 0,
-        long tickBOffsetMs = 0,
+        long feedASilenceMs = 0,
+        long feedBSilenceMs = 0,
         string symbolA = "XAUUSD",
         string symbolB = "XAUUSD")
     {
         var effectiveNowMs = BaseNowMs + nowMs;
         var effectiveTickCountMs = 10_000_000 + nowMs;
-        var a = new TickRecord(1, effectiveTickCountMs + tickAOffsetMs, bidA, askA, askA - bidA, effectiveNowMs + tickAOffsetMs, symbolA);
-        var b = new TickRecord(1, effectiveTickCountMs + tickBOffsetMs, bidB, askB, spreadB, effectiveNowMs + tickBOffsetMs, symbolB);
-        return new MarketSnapshot(a, b, effectiveNowMs, gapBuy, gapSell, effectiveTickCountMs);
+        var a = new TickRecord(1, effectiveTickCountMs, bidA, askA, askA - bidA, effectiveNowMs, symbolA);
+        var b = new TickRecord(1, effectiveTickCountMs, bidB, askB, spreadB, effectiveNowMs, symbolB);
+        return new MarketSnapshot(a, b, effectiveNowMs, gapBuy, gapSell, effectiveTickCountMs, feedASilenceMs, feedBSilenceMs);
     }
 }

@@ -49,6 +49,8 @@ public sealed class SimulationTests
         var stats = new RollingGapStats();
         var signalEngine = new LeadFollowSignalEngine();
         var clusterEngine = new DryRunClusterEngine();
+        var feedAFreshness = new FeedFreshnessTracker();
+        var feedBFreshness = new FeedFreshnessTracker();
 
         TickRecord? curA = null;
         TickRecord? curB = null;
@@ -81,7 +83,9 @@ public sealed class SimulationTests
             if (curA is null || curB is null) continue;
 
             var (gapBuy, gapSell) = GapCalculator.Calculate(curA, curB);
-            var snapshot = new MarketSnapshot(curA, curB, ms, gapBuy, gapSell, ms);
+            var feedASilenceMs = feedAFreshness.Observe(curA.EaTickCountMs, ms);
+            var feedBSilenceMs = feedBFreshness.Observe(curB.EaTickCountMs, ms);
+            var snapshot = new MarketSnapshot(curA, curB, ms, gapBuy, gapSell, ms, feedASilenceMs, feedBSilenceMs);
             stats.Add(ms, gapBuy, gapSell, curB.Spread, (curA.Bid + curA.Ask) / 2.0);
             var thresholds = stats.GetThresholds();
             var signal = signalEngine.Evaluate(snapshot, thresholds);

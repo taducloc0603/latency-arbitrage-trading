@@ -20,9 +20,10 @@ Sau khi mo, MinHoldMs ngan (`3000ms`) + AReversalUsd thap (`$0.40`) cho phep don
 - Map B mac dinh: `Local\MT_B_Tick`
 - Tool doc tick tu shared memory, layout tick hien tai: `count:int32`, `ea_ms:uint64`, padding `4` bytes, `Bid`, `Ask`, `Spread`, `TickTimeMsc`, `Symbol[16]`.
 - `ea_ms` la clock monotonic tu Windows `GetTickCount64` ben EA, khong phai Unix epoch.
-- `Latency` duoc tinh uu tien bang `Environment.TickCount64 - ea_ms`. Gia tri hop le phai nam trong khoang `0..86_400_000ms` (24h).
+- `Latency` duoc tinh uu tien bang `Environment.TickCount64 - ea_ms`. Gia tri hop le phai nam trong khoang `0..86_400_000ms` (24h). Day la metric **chi de hien thi** cho user xem.
 - Neu `ea_ms` thieu/khong hop le, tool fallback sang `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - TickTimeMsc` khi `TickTimeMsc` la Unix epoch milliseconds hop le. Neu ca 2 nguon khong hop le thi hien `unknown`.
 - `nowTickCountMs` duoc capture **ngay sau khi doc xong tickA va tickB**, giam thoi gian troi giua EA ghi `ea_ms` va C# doc latency.
+- **Stale check dung "silence" thay vi "latency"** ([FeedFreshnessTracker.cs](LatencyArbTool.Core/Services/FeedFreshnessTracker.cs)): track thoi gian ke tu lan cuoi `ea_ms` thay doi (tick moi den). Quiet market khien tick sparse → silence reset moi tick mới → feed van duoc coi la khoe. Feed thuc su die → silence tang den threshold → block. Tranh false positive cho sparse-but-alive feed (P95 B interval 2.3s trong run 6 khong block bot).
 - Live safety chi check lenh that o feed B. Tu `MapNameB`, tool derive map trade/history bang cach thay hau to `Tick`: `Local\MT_B_Tick` -> `Local\MT_B_Trade` va `Local\MT_B_History`. Trade co fallback `Local\MT_B_Trades` de tuong thich writer cu.
 - Symbol A/B khong can giong nhau. Dieu kien `symbol mismatch` da duoc bo.
 
@@ -42,9 +43,10 @@ Sau khi mo, MinHoldMs ngan (`3000ms`) + AReversalUsd thap (`$0.40`) cho phep don
 - Nguong dong co dinh:
   - `CloseBuyRevert = 0`
   - `CloseSellRevert = 0`
-- Feed stale:
-  - Feed A stale neu latency khong hop le hoac `> 5000ms`.
-  - Feed B stale neu latency khong hop le hoac `> 3000ms`.
+- Feed stale (silence-based, KHONG phai latency):
+  - Feed A stale neu silence (ms ke tu `ea_ms` doi cuoi cung) `> 10000ms`, hoac latency khong hop le.
+  - Feed B stale neu silence `> 15000ms`, hoac latency khong hop le.
+  - Trong quiet market, silence reset moi khi co tick moi → khong false positive.
 - Spread B bat thuong neu `MedianSpreadB > 0` va `SpreadB > MedianSpreadB * 2.5`.
 - A volatility filter: tinh range `max(midA) - min(midA)` trong rolling `60s`. Neu `ARangePoints < 50` thi chan mo lenh (`A volatility low`).
 
@@ -132,7 +134,7 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 
 ### Filter / safety
 
-- `FeedAStaleMs` / `FeedBStaleMs` (`5000` / `3000`): latency toi da cho tung feed.
+- `FeedAStaleMs` / `FeedBStaleMs` (`10000` / `15000`): silence toi da cho tung feed (ms ke tu `ea_ms` doi cuoi). KHONG phai raw latency. B threshold lon hon vi broker B thuong sparse hon. Tang khi muon allow trade trong quiet market dai hon, giam khi muon strict hon ve feed health.
 - `SpreadBMaxMultiplier` (`2.5`): bo signal khi spread B vuot `MedianSpreadB * he so` nay.
 - `AVolWindowMs` / `MinAVolPoints` (`60000` / `50`): cua so do volatility cua A va nguong toi thieu de cho phep mo lenh.
 

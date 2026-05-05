@@ -17,6 +17,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly DryRunClusterEngine _clusterEngine = new();
     private readonly Mt5Engine _mt5Engine = new();
     private readonly Mt5TradeExecutor _tradeExecutor;
+    private readonly FeedFreshnessTracker _feedAFreshness = new();
+    private readonly FeedFreshnessTracker _feedBFreshness = new();
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
     private bool _isRunning;
@@ -197,6 +199,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _signalEngine.Reset();
         _clusterEngine.Reset();
+        _feedAFreshness.Reset();
+        _feedBFreshness.Reset();
         UpdateClusterUi();
         AddLog("reset live state");
     }
@@ -218,7 +222,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var (gapBuy, gapSell) = GapCalculator.Calculate(tickA.Tick, tickB.Tick);
-        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs);
+        var feedASilenceMs = _feedAFreshness.Observe(tickA.Tick.EaTickCountMs, nowTickCountMs);
+        var feedBSilenceMs = _feedBFreshness.Observe(tickB.Tick.EaTickCountMs, nowTickCountMs);
+        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs, feedASilenceMs, feedBSilenceMs);
 
         _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread, (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0);
         var thresholds = _stats.GetThresholds();

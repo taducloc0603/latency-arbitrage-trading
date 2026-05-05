@@ -23,8 +23,10 @@ public static class StrategyDefaults
     public const int CloseSellRevertFallback = 0;
     public const double AReversalUsd = 0.40;
 
-    public const int FeedAStaleMs = 5000;
-    public const int FeedBStaleMs = 3000;
+    // Silence threshold: ms since last new tick (ea_ms change). Larger = more lenient
+    // for sparse feeds. Different from raw latency which grows during quiet markets.
+    public const int FeedAStaleMs = 10000;
+    public const int FeedBStaleMs = 15000;
     public const double SpreadBMaxMultiplier = 2.5;
 
     public const int AVolWindowMs = 60_000;
