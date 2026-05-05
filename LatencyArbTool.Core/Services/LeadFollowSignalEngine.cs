@@ -13,6 +13,15 @@ public sealed class LeadFollowSignalEngine
 
     public SignalSide? Evaluate(MarketSnapshot snapshot, GapThresholds thresholds)
     {
+        // If polling missed ticks since the last evaluation, the gap continuity that
+        // the confirm/recheck phases rely on is no longer trustworthy: an unseen
+        // intermediate tick may have crossed the threshold. Reset and start fresh.
+        if (snapshot.PollMissedTicks)
+        {
+            Reset();
+            return null;
+        }
+
         var buyConfirmed = UpdateBuy(snapshot, thresholds);
         var sellConfirmed = UpdateSell(snapshot, thresholds);
 

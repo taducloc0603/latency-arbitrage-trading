@@ -19,6 +19,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly Mt5TradeExecutor _tradeExecutor;
     private readonly FeedFreshnessTracker _feedAFreshness = new();
     private readonly FeedFreshnessTracker _feedBFreshness = new();
+    private readonly SequenceTracker _feedASeq = new();
+    private readonly SequenceTracker _feedBSeq = new();
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
     private bool _isRunning;
@@ -64,7 +66,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _tradeExecutor = new Mt5TradeExecutor(_mt5Engine);
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
         _timer.Tick += (_, _) => Poll();
 
         CheckMapsCommand = new RelayCommand(CheckMaps);
@@ -201,6 +203,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _clusterEngine.Reset();
         _feedAFreshness.Reset();
         _feedBFreshness.Reset();
+        _feedASeq.Reset();
+        _feedBSeq.Reset();
         UpdateClusterUi();
         AddLog("reset live state");
     }
@@ -224,7 +228,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var (gapBuy, gapSell) = GapCalculator.Calculate(tickA.Tick, tickB.Tick);
         var feedASilenceMs = _feedAFreshness.Observe(tickA.Tick.EaTickCountMs, nowTickCountMs);
         var feedBSilenceMs = _feedBFreshness.Observe(tickB.Tick.EaTickCountMs, nowTickCountMs);
-        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs, feedASilenceMs, feedBSilenceMs);
+        var feedASeqDelta = _feedASeq.ObserveDelta(tickA.Tick.Count);
+        var feedBSeqDelta = _feedBSeq.ObserveDelta(tickB.Tick.Count);
+        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs, feedASilenceMs, feedBSilenceMs, feedASeqDelta, feedBSeqDelta);
 
         _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread, (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0);
         var thresholds = _stats.GetThresholds();

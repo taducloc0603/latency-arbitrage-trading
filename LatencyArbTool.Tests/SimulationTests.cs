@@ -22,6 +22,7 @@ public sealed class SimulationTests
     [InlineData("20260504_120733_286")]
     [InlineData("20260504_114822_008")]
     [InlineData("20260505_023742_297")]
+    [InlineData("20260505_072352_271")]
     public void Simulate(string runId)
     {
         if (DataDir is null)
@@ -51,6 +52,13 @@ public sealed class SimulationTests
         var clusterEngine = new DryRunClusterEngine();
         var feedAFreshness = new FeedFreshnessTracker();
         var feedBFreshness = new FeedFreshnessTracker();
+        // Sim sees every tick (no polling skip) so seq increments by 1 each step.
+        // SequenceTracker would still produce delta=1, satisfying the engine's
+        // PollMissedTicks check.
+        var feedASeq = new SequenceTracker();
+        var feedBSeq = new SequenceTracker();
+        var aSeqCounter = 0;
+        var bSeqCounter = 0;
 
         TickRecord? curA = null;
         TickRecord? curB = null;
@@ -71,11 +79,13 @@ public sealed class SimulationTests
         {
             if (side == 'A')
             {
-                curA = tick with { EaTickCountMs = ms };
+                aSeqCounter++;
+                curA = tick with { EaTickCountMs = ms, Count = aSeqCounter };
             }
             else
             {
-                curB = tick with { EaTickCountMs = ms };
+                bSeqCounter++;
+                curB = tick with { EaTickCountMs = ms, Count = bSeqCounter };
                 if (lastBMs is not null) bIntervals.Add(ms - lastBMs.Value);
                 lastBMs = ms;
             }
@@ -85,7 +95,9 @@ public sealed class SimulationTests
             var (gapBuy, gapSell) = GapCalculator.Calculate(curA, curB);
             var feedASilenceMs = feedAFreshness.Observe(curA.EaTickCountMs, ms);
             var feedBSilenceMs = feedBFreshness.Observe(curB.EaTickCountMs, ms);
-            var snapshot = new MarketSnapshot(curA, curB, ms, gapBuy, gapSell, ms, feedASilenceMs, feedBSilenceMs);
+            var feedASeqDelta = feedASeq.ObserveDelta(curA.Count);
+            var feedBSeqDelta = feedBSeq.ObserveDelta(curB.Count);
+            var snapshot = new MarketSnapshot(curA, curB, ms, gapBuy, gapSell, ms, feedASilenceMs, feedBSilenceMs, feedASeqDelta, feedBSeqDelta);
             stats.Add(ms, gapBuy, gapSell, curB.Spread, (curA.Bid + curA.Ask) / 2.0);
             var thresholds = stats.GetThresholds();
             var signal = signalEngine.Evaluate(snapshot, thresholds);
@@ -246,6 +258,149 @@ public sealed class SimulationTests
             result.Add((ms, new TickRecord(1, ms, bid, ask, spread, tickTimeMsc, symbol)));
         }
         return result;
+    }
+
+    /// <summary>
+    /// Polling-emulated simulation: instead of processing every tick CSV row
+    /// (which assumes perfect information), iterate time in `pollIntervalMs`
+    /// steps and at each step take the latest tick available. This matches what
+    /// the real bot sees: ticks that arrived between two polls are coalesced
+    /// (only the latest is read), with the EA-side seq counter advancing across
+    /// the gap so SequenceTracker reports the miss.
+    ///
+    /// Compares directly with `Simulate` (event-driven) to quantify the polling
+    /// artifact's impact on engine behavior.
+    /// </summary>
+    [Theory]
+    [InlineData("20260504_002742_265")]
+    [InlineData("20260504_034135_243")]
+    [InlineData("20260504_120733_286")]
+    [InlineData("20260504_114822_008")]
+    [InlineData("20260505_023742_297")]
+    [InlineData("20260505_072352_271")]
+    public void SimulatePolled(string runId)
+    {
+        const long pollIntervalMs = 25;
+        if (DataDir is null)
+        {
+            _out.WriteLine($"Skipping {runId}: tick data directory not found near repo root");
+            return;
+        }
+
+        var aPath = Path.Combine(DataDir, $"{runId}_tickA.csv");
+        var bPath = Path.Combine(DataDir, $"{runId}_tickB.csv");
+        if (!File.Exists(aPath) || !File.Exists(bPath))
+        {
+            _out.WriteLine($"Skipping {runId}: tick CSVs not present in {DataDir}");
+            return;
+        }
+
+        var ticksA = LoadTicks(aPath);
+        var ticksB = LoadTicks(bPath);
+        if (ticksA.Count == 0 || ticksB.Count == 0)
+        {
+            _out.WriteLine($"Skipping {runId}: empty tick streams");
+            return;
+        }
+
+        var startMs = Math.Min(ticksA[0].ms, ticksB[0].ms);
+        var endMs = Math.Max(ticksA[^1].ms, ticksB[^1].ms);
+
+        var stats = new RollingGapStats();
+        var signalEngine = new LeadFollowSignalEngine();
+        var clusterEngine = new DryRunClusterEngine();
+        var feedAFreshness = new FeedFreshnessTracker();
+        var feedBFreshness = new FeedFreshnessTracker();
+        var feedASeq = new SequenceTracker();
+        var feedBSeq = new SequenceTracker();
+
+        var aIdx = 0;
+        var bIdx = 0;
+        var aSeqCounter = 0;
+        var bSeqCounter = 0;
+
+        var opens = new List<DryRunEvent>();
+        var closes = new List<DryRunEvent>();
+        var blocks = new Dictionary<string, int>();
+        var pollsTotal = 0;
+        var pollsWithMissedTicks = 0;
+        var totalAMissed = 0L;
+        var totalBMissed = 0L;
+
+        for (var nowMs = startMs; nowMs <= endMs; nowMs += pollIntervalMs)
+        {
+            // Advance pointers — count every tick the EA produced since last poll.
+            // The seq counter mirrors what the EA would have written.
+            while (aIdx < ticksA.Count && ticksA[aIdx].ms <= nowMs)
+            {
+                aSeqCounter++;
+                aIdx++;
+            }
+            while (bIdx < ticksB.Count && ticksB[bIdx].ms <= nowMs)
+            {
+                bSeqCounter++;
+                bIdx++;
+            }
+
+            if (aIdx == 0 || bIdx == 0) continue;
+
+            var aTick = ticksA[aIdx - 1].tick with { Count = aSeqCounter, EaTickCountMs = ticksA[aIdx - 1].ms };
+            var bTick = ticksB[bIdx - 1].tick with { Count = bSeqCounter, EaTickCountMs = ticksB[bIdx - 1].ms };
+
+            var (gapBuy, gapSell) = GapCalculator.Calculate(aTick, bTick);
+            var feedASilenceMs = feedAFreshness.Observe(aTick.EaTickCountMs, nowMs);
+            var feedBSilenceMs = feedBFreshness.Observe(bTick.EaTickCountMs, nowMs);
+            var feedASeqDelta = feedASeq.ObserveDelta(aTick.Count);
+            var feedBSeqDelta = feedBSeq.ObserveDelta(bTick.Count);
+            var snapshot = new MarketSnapshot(aTick, bTick, nowMs, gapBuy, gapSell, nowMs, feedASilenceMs, feedBSilenceMs, feedASeqDelta, feedBSeqDelta);
+
+            stats.Add(nowMs, gapBuy, gapSell, bTick.Spread, (aTick.Bid + aTick.Ask) / 2.0);
+            var thresholds = stats.GetThresholds();
+            var signal = signalEngine.Evaluate(snapshot, thresholds);
+            var stepEvents = clusterEngine.Step(snapshot, thresholds, signal);
+
+            pollsTotal++;
+            if (snapshot.PollMissedTicks)
+            {
+                pollsWithMissedTicks++;
+                if (feedASeqDelta > 1) totalAMissed += feedASeqDelta - 1;
+                if (feedBSeqDelta > 1) totalBMissed += feedBSeqDelta - 1;
+            }
+
+            foreach (var ev in stepEvents)
+            {
+                if (ev.Decision == "live open") opens.Add(ev);
+                else if (ev.Decision == "live close") closes.Add(ev);
+                else if (ev.Decision == "guard block")
+                {
+                    blocks.TryGetValue(ev.Reason, out var c);
+                    blocks[ev.Reason] = c + 1;
+                }
+            }
+        }
+
+        var totalPnl = closes.Sum(c => c.PnlRaw);
+        var wins = closes.Count(c => c.PnlRaw > 0);
+        var losses = closes.Count(c => c.PnlRaw < 0);
+
+        _out.WriteLine($"=== Run {runId} (polling-emulated, {pollIntervalMs}ms) ===");
+        _out.WriteLine($"Tick events: A={ticksA.Count}, B={ticksB.Count}");
+        _out.WriteLine($"Polls processed: {pollsTotal}, with missed ticks: {pollsWithMissedTicks} ({(pollsTotal > 0 ? 100.0 * pollsWithMissedTicks / pollsTotal : 0):F1}%)");
+        _out.WriteLine($"Total A ticks missed: {totalAMissed} ({(ticksA.Count > 0 ? 100.0 * totalAMissed / ticksA.Count : 0):F1}% of CSV)");
+        _out.WriteLine($"Total B ticks missed: {totalBMissed} ({(ticksB.Count > 0 ? 100.0 * totalBMissed / ticksB.Count : 0):F1}% of CSV)");
+        _out.WriteLine($"Opens: {opens.Count}, Closes: {closes.Count}");
+        _out.WriteLine($"Wins: {wins}, Losses: {losses}, Win rate: {(wins + losses > 0 ? 100.0 * wins / (wins + losses) : 0):F1}%");
+        _out.WriteLine($"Total PnL (raw, sim units): {totalPnl:F2}");
+        if (closes.Count > 0)
+        {
+            _out.WriteLine($"Avg win: {(wins > 0 ? closes.Where(c => c.PnlRaw > 0).Average(c => c.PnlRaw) : 0):F2}");
+            _out.WriteLine($"Avg loss: {(losses > 0 ? closes.Where(c => c.PnlRaw < 0).Average(c => c.PnlRaw) : 0):F2}");
+        }
+        _out.WriteLine("Blocks by reason (top 10):");
+        foreach (var kv in blocks.OrderByDescending(k => k.Value).Take(10))
+        {
+            _out.WriteLine($"  {kv.Key}: {kv.Value}");
+        }
     }
 
     private sealed record GapSample(long Ms, int GapBuy, int GapSell, double SpreadB);
