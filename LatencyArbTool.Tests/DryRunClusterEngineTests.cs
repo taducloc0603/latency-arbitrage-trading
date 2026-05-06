@@ -128,15 +128,16 @@ public sealed class DryRunClusterEngineTests
     }
 
     [Fact]
-    public void Step_FeedBStaleBlocksOpen()
+    public void Step_FeedBStaleEmitsShadowBlockButStillOpens()
     {
         var engine = new DryRunClusterEngine();
 
         var events = engine.Step(Snapshot(10_000, gapBuy: -80, gapSell: 0, feedBSilenceMs: StrategyDefaults.FeedBStaleMs + 1000), Thresholds(), SignalSide.BuyB);
 
-        Assert.Equal(BotState.Idle, engine.State);
-        Assert.Null(engine.CurrentCluster);
-        Assert.Contains(events, e => e.Decision == "guard block" && e.Reason == "feed B stale");
+        Assert.Equal(BotState.Holding, engine.State);
+        Assert.NotNull(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "shadow block" && e.Reason == "feed B stale");
+        Assert.Contains(events, e => e.Decision == "live open" && e.ShadowBlockReasons.Contains("feed B stale"));
     }
 
     [Fact]
@@ -155,26 +156,28 @@ public sealed class DryRunClusterEngineTests
     }
 
     [Fact]
-    public void Step_AbnormalSpreadBlocksOpen()
+    public void Step_AbnormalSpreadEmitsShadowBlockButStillOpens()
     {
         var engine = new DryRunClusterEngine();
 
-        var events = engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, spreadB: 3), Thresholds(), SignalSide.BuyB);
+        var events = engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, spreadB: 10), Thresholds(), SignalSide.BuyB);
 
-        Assert.Null(engine.CurrentCluster);
-        Assert.Contains(events, e => e.Decision == "guard block" && e.Reason == "spread B abnormal");
+        Assert.NotNull(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "shadow block" && e.Reason == "spread B abnormal");
+        Assert.Contains(events, e => e.Decision == "live open" && e.ShadowBlockReasons.Contains("spread B abnormal"));
     }
 
     [Fact]
-    public void Step_LowAVolatilityBlocksOpen()
+    public void Step_LowAVolatilityEmitsShadowBlockButStillOpens()
     {
         var engine = new DryRunClusterEngine();
         var lowVolThresholds = Thresholds() with { ARangePoints = StrategyDefaults.MinAVolPoints - 1 };
 
         var events = engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0), lowVolThresholds, SignalSide.BuyB);
 
-        Assert.Null(engine.CurrentCluster);
-        Assert.Contains(events, e => e.Decision == "guard block" && e.Reason == "A volatility low");
+        Assert.NotNull(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "shadow block" && e.Reason == "A volatility low");
+        Assert.Contains(events, e => e.Decision == "live open" && e.ShadowBlockReasons.Contains("A volatility low"));
     }
 
     private static GapThresholds Thresholds()

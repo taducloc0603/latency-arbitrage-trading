@@ -140,7 +140,7 @@ Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/Stra
 
 - `ConfirmMs` (`500`): Phase 1 - gap phai vuot threshold lien tuc bao lau truoc khi vao re-check.
 - `ReCheckMs` (`200`): Phase 2 - sau confirm, cho them bao lau roi moi danh gia stability. Tong wait `700ms`.
-- `StabilityRatio` (`0.65`): Phase 3 - cuoi re-check, `|currentGap|` phai >= ratio nay nhan voi `|peakGap|` quan sat trong window. Set `0.65` sau khi sweep voi polling-emulated sim: gia tri thap (0.40) cho phep too many trades trong run-6-style market (sparse B + trending), value cao filter selectively chi cac sustained signal voi gap on dinh.
+- `StabilityRatio` (`0.65`): Phase 3 - cuoi re-check, `|currentGap|` phai >= ratio nay nhan voi `|peakGap|` quan sat trong window. V1 strict — confirmed via run 8 (2.6h moderate market, 0 trades CORRECT vs V2 0.55 = 9 trades 11% WR -16.88). Strategy chi trade khi co arb opportunity that su, skip cac noise market.
 
 ### Threshold
 

@@ -9,11 +9,12 @@ public sealed class CsvLoggerTests
     public void LogTick_WritesResolvedLatencyColumns()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"latency-arb-tests-{Guid.NewGuid():N}");
+        var logsDirectory = Path.Combine(directory, "logs");
         Directory.CreateDirectory(directory);
 
         try
         {
-            using (var logger = new CsvLogger(directory))
+            using (var logger = new CsvLogger(logsDirectory))
             {
                 var snapshot = Snapshot();
                 var thresholds = new GapThresholds(-50, 30, -15, 20, 0, 0, 0, 0, 1, 1, true);
@@ -37,11 +38,12 @@ public sealed class CsvLoggerTests
     public void LogDecision_WritesReason()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"latency-arb-tests-{Guid.NewGuid():N}");
+        var logsDirectory = Path.Combine(directory, "logs");
         Directory.CreateDirectory(directory);
 
         try
         {
-            using (var logger = new CsvLogger(directory))
+            using (var logger = new CsvLogger(logsDirectory))
             {
                 var snapshot = Snapshot();
                 var thresholds = new GapThresholds(-50, 30, -15, 20, 0, 0, 0, 0, 1, 1, true);

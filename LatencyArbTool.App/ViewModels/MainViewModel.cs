@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
 using System.Windows.Threading;
 using LatencyArbTool.App.Services;
 using LatencyArbTool.Core.Models;
@@ -182,11 +183,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void Start()
     {
         _csvLogger?.Dispose();
-        _csvLogger = new CsvLogger(AppContext.BaseDirectory);
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var logsDirectory = Path.Combine(desktop, "arb-log");
+        _csvLogger = new CsvLogger(logsDirectory);
         IsRunning = true;
         _timer.Start();
         UpdateLiveStatus();
-        AddLog("start live mode");
+        AddLog($"start live mode; logs at {logsDirectory}");
     }
 
     private void Stop()
@@ -241,6 +244,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         LogInvalidLatencyWarnings(snapshot);
         UpdateClusterUi();
         _csvLogger?.LogTick(snapshot, thresholds);
+
+        // Log signal state only when accumulation is in progress or a signal fired —
+        // skipping idle ticks keeps signal_*.csv readable while still capturing how
+        // close each candidate got to confirmation.
+        if (signal is not null
+            || _signalEngine.ExtremeSinceBuyMs is not null
+            || _signalEngine.ExtremeSinceSellMs is not null)
+        {
+            _csvLogger?.LogSignal(nowMs, snapshot, thresholds, _signalEngine, signal);
+        }
 
         foreach (var dryRunEvent in events)
         {

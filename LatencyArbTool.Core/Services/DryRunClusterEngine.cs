@@ -44,18 +44,15 @@ public sealed class DryRunClusterEngine
             return events;
         }
 
-        if (!CanOpenOrStack(snapshot, thresholds, events))
-        {
-            return events;
-        }
-
         if (signal is SignalSide.BuyB)
         {
-            Open(snapshot, DryRunSide.BuyB, snapshot.B.Ask, events);
+            EmitShadowBlocks(snapshot, thresholds, events, out var shadowReasons);
+            Open(snapshot, DryRunSide.BuyB, snapshot.B.Ask, events, shadowReasons);
         }
         else if (signal is SignalSide.SellB)
         {
-            Open(snapshot, DryRunSide.SellB, snapshot.B.Bid, events);
+            EmitShadowBlocks(snapshot, thresholds, events, out var shadowReasons);
+            Open(snapshot, DryRunSide.SellB, snapshot.B.Bid, events, shadowReasons);
         }
 
         return events;
@@ -68,7 +65,7 @@ public sealed class DryRunClusterEngine
         _healthyATickCount = 0;
     }
 
-    private void Open(MarketSnapshot snapshot, DryRunSide side, double price, List<DryRunEvent> events)
+    private void Open(MarketSnapshot snapshot, DryRunSide side, double price, List<DryRunEvent> events, string shadowReasons = "")
     {
         var cluster = new DryRunCluster(
             _nextClusterId++,
@@ -79,12 +76,12 @@ public sealed class DryRunClusterEngine
 
         CurrentCluster = cluster;
         State = BotState.Holding;
-        AddOrder(snapshot, price, "live open", "confirmed signal", events);
+        AddOrder(snapshot, price, "live open", "confirmed signal", events, shadowReasons);
     }
 
     private void TryStack(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events)
     {
-        if (CurrentCluster is null || !CanOpenOrStack(snapshot, thresholds, events))
+        if (CurrentCluster is null)
         {
             return;
         }
@@ -102,11 +99,13 @@ public sealed class DryRunClusterEngine
 
         if (CurrentCluster.Side == DryRunSide.BuyB && snapshot.GapBuy <= thresholds.OpenBuy)
         {
-            AddOrder(snapshot, snapshot.B.Ask, "live stack", "buy gap still extreme", events);
+            EmitShadowBlocks(snapshot, thresholds, events, out var shadowReasons);
+            AddOrder(snapshot, snapshot.B.Ask, "live stack", "buy gap still extreme", events, shadowReasons);
         }
         else if (CurrentCluster.Side == DryRunSide.SellB && snapshot.GapSell >= thresholds.OpenSell)
         {
-            AddOrder(snapshot, snapshot.B.Bid, "live stack", "sell gap still extreme", events);
+            EmitShadowBlocks(snapshot, thresholds, events, out var shadowReasons);
+            AddOrder(snapshot, snapshot.B.Bid, "live stack", "sell gap still extreme", events, shadowReasons);
         }
     }
 
@@ -200,7 +199,8 @@ public sealed class DryRunClusterEngine
         double price,
         string decision,
         string reason,
-        List<DryRunEvent> events)
+        List<DryRunEvent> events,
+        string shadowReasons = "")
     {
         if (CurrentCluster is null)
         {
@@ -228,43 +228,44 @@ public sealed class DryRunClusterEngine
             CurrentCluster.Side,
             CurrentCluster.Orders.Count,
             OpenPrice: price,
-            Lot: lot));
+            Lot: lot,
+            ShadowBlockReasons: shadowReasons));
     }
 
-    private bool CanOpenOrStack(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events)
+    // Loosened: guards now run in shadow mode. They no longer block opens/stacks;
+    // they emit "shadow block" events so we can analyze post-run which trades
+    // would have been filtered. The same reasons are also packed into the open/stack
+    // event's ShadowBlockReasons field for direct correlation in CSV.
+    private void EmitShadowBlocks(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events, out string joined)
     {
+        var reasons = new List<string>(3);
         if (snapshot.FeedBIsStale)
         {
-            events.Add(Block(snapshot, snapshot.HasValidFeedBLatency ? "feed B stale" : "feed B invalid tick latency"));
-            return false;
+            reasons.Add(snapshot.HasValidFeedBLatency ? "feed B stale" : "feed B invalid tick latency");
         }
-
         if (thresholds.MedianSpreadB > 0 &&
             snapshot.B.Spread > thresholds.MedianSpreadB * StrategyDefaults.SpreadBMaxMultiplier)
         {
-            events.Add(Block(snapshot, "spread B abnormal"));
-            return false;
+            reasons.Add("spread B abnormal");
         }
-
         if (thresholds.ARangePoints < StrategyDefaults.MinAVolPoints)
         {
-            events.Add(Block(snapshot, "A volatility low"));
-            return false;
+            reasons.Add("A volatility low");
         }
 
-        return true;
-    }
+        foreach (var r in reasons)
+        {
+            events.Add(new DryRunEvent(
+                "shadow block",
+                r,
+                State,
+                snapshot.NowMs,
+                CurrentCluster?.ClusterId,
+                CurrentCluster?.Side,
+                CurrentCluster?.Orders.Count ?? 0));
+        }
 
-    private DryRunEvent Block(MarketSnapshot snapshot, string reason)
-    {
-        return new DryRunEvent(
-            "guard block",
-            reason,
-            State,
-            snapshot.NowMs,
-            CurrentCluster?.ClusterId,
-            CurrentCluster?.Side,
-            CurrentCluster?.Orders.Count ?? 0);
+        joined = reasons.Count == 0 ? string.Empty : string.Join("|", reasons);
     }
 
     private void EnterEmergency(MarketSnapshot snapshot, List<DryRunEvent> events, string reason)

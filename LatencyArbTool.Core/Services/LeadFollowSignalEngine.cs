@@ -11,17 +11,21 @@ public sealed class LeadFollowSignalEngine
     private int? _peakGapBuy;
     private int? _peakGapSell;
 
+    // Exposed for diagnostic logging — lets the CSV capture how close the signal got.
+    public long? ExtremeSinceBuyMs => _extremeSinceBuyMs;
+    public long? ExtremeSinceSellMs => _extremeSinceSellMs;
+    public long? ConfirmReachedAtBuyMs => _confirmReachedAtBuyMs;
+    public long? ConfirmReachedAtSellMs => _confirmReachedAtSellMs;
+    public int? PeakGapBuy => _peakGapBuy;
+    public int? PeakGapSell => _peakGapSell;
+
     public SignalSide? Evaluate(MarketSnapshot snapshot, GapThresholds thresholds)
     {
-        // If polling missed ticks since the last evaluation, the gap continuity that
-        // the confirm/recheck phases rely on is no longer trustworthy: an unseen
-        // intermediate tick may have crossed the threshold. Reset and start fresh.
-        if (snapshot.PollMissedTicks)
-        {
-            Reset();
-            return null;
-        }
-
+        // Loosened: previously we reset whenever PollMissedTicks was true, but with a
+        // fast A feed and 25ms polling that fires nearly every tick and prevents the
+        // confirm/recheck windows from ever accumulating. Continuity is now governed
+        // solely by gap-vs-threshold: if the unseen intermediate tick crossed back,
+        // the next observed gap will be on the wrong side and reset state naturally.
         var buyConfirmed = UpdateBuy(snapshot, thresholds);
         var sellConfirmed = UpdateSell(snapshot, thresholds);
 

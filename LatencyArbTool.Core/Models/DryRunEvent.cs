@@ -12,5 +12,5 @@ public sealed record DryRunEvent(
     double ClosePrice = 0,
     double Lot = 0,
     double PnlRaw = 0,
-    long HoldMs = 0);
-
+    long HoldMs = 0,
+    string ShadowBlockReasons = "");
