@@ -8,8 +8,8 @@ public static class StrategyDefaults
     public const double KStd = 2.0;
 
     public const int WarmupMinSamples = 100;
-    public const int FixedOpenBuyFallback = -50;
-    public const int FixedOpenSellFallback = 40;
+    public const int FixedOpenBuyFallback = -75;
+    public const int FixedOpenSellFallback = 65;
 
     public const int ConfirmMs = 200;
     public const int ReCheckMs = 100;
@@ -21,7 +21,7 @@ public static class StrategyDefaults
 
     public const int CloseBuyRevertFallback = 0;
     public const int CloseSellRevertFallback = 0;
-    public const double AReversalUsd = 0.40;
+    public const double AReversalUsd = 1.20;
 
     // Silence threshold: ms since last new tick (ea_ms change). Larger = more lenient
     // for sparse feeds. Different from raw latency which grows during quiet markets.

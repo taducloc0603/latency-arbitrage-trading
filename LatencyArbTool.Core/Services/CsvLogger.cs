@@ -11,6 +11,7 @@ public sealed class CsvLogger : IDisposable
     private readonly StreamWriter _decisions;
     private readonly StreamWriter _clusters;
     private readonly StreamWriter _signal;
+    private readonly StreamWriter _fills;
 
     public CsvLogger(string logsDirectory)
     {
@@ -21,11 +22,13 @@ public sealed class CsvLogger : IDisposable
         _decisions = Create(Path.Combine(logsDirectory, $"decisions_{stamp}.csv"));
         _clusters = Create(Path.Combine(logsDirectory, $"clusters_{stamp}.csv"));
         _signal = Create(Path.Combine(logsDirectory, $"signal_{stamp}.csv"));
+        _fills = Create(Path.Combine(logsDirectory, $"fills_{stamp}.csv"));
 
         _ticks.WriteLine("timestamp,bidA,askA,bidB,askB,spreadA,spreadB,latencyA,latencyASource,latencyB,latencyBSource,gapBuy,gapSell,openBuyThreshold,openSellThreshold,medianBuy,medianSell,stdBuy,stdSell,medianSpreadB,aRangePoints,sampleCount,isWarmup,feedASilenceMs,feedBSilenceMs,feedASeqDelta,feedBSeqDelta");
         _decisions.WriteLine("timestamp,state,decision,reason,gapBuy,gapSell,openBuyThreshold,openSellThreshold,medianBuy,medianSell,stdBuy,stdSell,medianSpreadB,spreadB,aRangePoints,feedASilenceMs,feedBSilenceMs,shadowBlockReasons");
         _clusters.WriteLine("clusterId,event,side,orderCount,openPrice,closePrice,lot,pnlRaw,holdMs,closeReason,shadowBlockReasons");
         _signal.WriteLine("timestamp,gapBuy,gapSell,openBuyThreshold,openSellThreshold,extremeSinceBuyMs,confirmReachedBuyMs,peakGapBuy,extremeSinceSellMs,confirmReachedSellMs,peakGapSell,signalReturned");
+        _fills.WriteLine("kind,ticket,clusterId,side,decideTimeMs,fillTimeMs,slippageMs,decideGap,fillObservedGap,decidePrice,fillPrice,slippagePrice");
     }
 
     public void LogTick(MarketSnapshot snapshot, GapThresholds thresholds)
@@ -121,12 +124,30 @@ public sealed class CsvLogger : IDisposable
             signal?.ToString() ?? string.Empty));
     }
 
+    public void LogFill(FillEvent fill)
+    {
+        _fills.WriteLine(string.Join(',',
+            fill.IsClose ? "close" : "open",
+            fill.Ticket,
+            fill.ClusterId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            fill.Side,
+            fill.DecideTimeMs,
+            fill.FillTimeMs,
+            fill.SlippageMs,
+            fill.DecideGap,
+            fill.FillObservedGap,
+            F(fill.DecidePrice),
+            F(fill.FillPrice),
+            F(fill.SlippagePrice)));
+    }
+
     public void Flush()
     {
         _ticks.Flush();
         _decisions.Flush();
         _clusters.Flush();
         _signal.Flush();
+        _fills.Flush();
     }
 
     public void Dispose()
@@ -135,6 +156,7 @@ public sealed class CsvLogger : IDisposable
         _decisions.Dispose();
         _clusters.Dispose();
         _signal.Dispose();
+        _fills.Dispose();
     }
 
     private static StreamWriter Create(string path)

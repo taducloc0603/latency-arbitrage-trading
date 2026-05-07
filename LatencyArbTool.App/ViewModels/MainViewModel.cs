@@ -22,6 +22,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly FeedFreshnessTracker _feedBFreshness = new();
     private readonly SequenceTracker _feedASeq = new();
     private readonly SequenceTracker _feedBSeq = new();
+    private readonly FillTracker _fillTracker = new();
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
     private bool _isRunning;
@@ -29,8 +30,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _loggedInvalidLatencyB;
     private bool _loggedBTradeDisconnected;
     private bool _loggedBHistoryDisconnected;
-    private long _nextBPositionReadTickCountMs;
-    private string _chartHwndText = string.Empty;
+private string _chartHwndText = string.Empty;
     private string _tradeHwndText = string.Empty;
     private string _liveStatus = "Live mode on; waiting for valid HWND";
     private string _mapNameA = @"Local\MT_A_Tick";
@@ -208,19 +208,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _feedBFreshness.Reset();
         _feedASeq.Reset();
         _feedBSeq.Reset();
+        _fillTracker.Reset();
         UpdateClusterUi();
         AddLog("reset live state");
     }
 
     private void Poll()
     {
-        UpdateBPositionMaps(Environment.TickCount64);
-
         var tickA = _reader.TryRead(MapNameA);
         var tickB = _reader.TryRead(MapNameB);
         var nowTickCountMs = Environment.TickCount64;
         StatusA = tickA.Success ? "Connected" : $"Disconnected: {tickA.Error}";
         StatusB = tickB.Success ? "Connected" : $"Disconnected: {tickB.Error}";
+
+        // Read trade + history maps every poll (cheap shared-memory read) so
+        // FillTracker can detect new tickets and disappearances at tick resolution.
+        // The previous 1 Hz throttle was for UI update only — moved into Poll.
+        var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
+        var bHistory = _historyReader.TryReadForTickMap(MapNameB);
+        UpdateBTradeUi(bTrades, logTransitions: true);
+        UpdateBHistoryUi(bHistory, logTransitions: true);
 
         if (tickA.Tick is null || tickB.Tick is null)
         {
@@ -245,9 +252,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         UpdateClusterUi();
         _csvLogger?.LogTick(snapshot, thresholds);
 
-        // Log signal state only when accumulation is in progress or a signal fired —
-        // skipping idle ticks keeps signal_*.csv readable while still capturing how
-        // close each candidate got to confirmation.
         if (signal is not null
             || _signalEngine.ExtremeSinceBuyMs is not null
             || _signalEngine.ExtremeSinceSellMs is not null)
@@ -259,17 +263,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             AddLog($"{dryRunEvent.Decision}: {dryRunEvent.Reason}");
             _csvLogger?.LogDecision(dryRunEvent, snapshot, thresholds);
-            ExecuteLiveIfEnabled(dryRunEvent);
+            ExecuteLiveIfEnabled(dryRunEvent, snapshot, bTrades, bHistory);
         }
+
+        ObserveFills(bTrades, bHistory, snapshot);
     }
 
-    private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent)
+    private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent, MarketSnapshot snapshot, TradeReadResult bTrades, HistoryReadResult bHistory)
     {
-        var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
-        var bHistory = _historyReader.TryReadForTickMap(MapNameB);
-        UpdateBTradeUi(bTrades, logTransitions: true);
-        UpdateBHistoryUi(bHistory, logTransitions: true);
-
         var result = _tradeExecutor.Execute(dryRunEvent, ChartHwndText, TradeHwndText, bTrades);
         if (!result.Attempted)
         {
@@ -283,6 +284,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (result.Success)
         {
             AddLog($"live audit: {FormatTradeAudit(bTrades)}; {FormatHistoryAudit(bHistory)}");
+            RecordClickContext(dryRunEvent, snapshot, bTrades);
         }
 
         if (dryRunEvent.Decision == "live close")
@@ -291,19 +293,41 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void UpdateBPositionMaps(long nowTickCountMs)
+    private void RecordClickContext(DryRunEvent dryRunEvent, MarketSnapshot snapshot, TradeReadResult bTrades)
     {
-        if (nowTickCountMs < _nextBPositionReadTickCountMs)
-        {
-            return;
-        }
+        var side = dryRunEvent.Side ?? DryRunSide.BuyB;
+        var decideGap = side == DryRunSide.BuyB ? snapshot.GapBuy : snapshot.GapSell;
+        var decidePrice = dryRunEvent.Decision == "live open" ? dryRunEvent.OpenPrice : dryRunEvent.ClosePrice;
+        var ctx = new ClickContext(
+            DecideTimeMs: snapshot.NowMs,
+            DecideGap: decideGap,
+            DecidePrice: decidePrice,
+            Side: side,
+            ClusterId: dryRunEvent.ClusterId,
+            Decision: dryRunEvent.Decision);
 
-        _nextBPositionReadTickCountMs = nowTickCountMs + 1000;
-        UpdateBTradeUi(_tradeReader.TryReadForTickMap(MapNameB), logTransitions: true);
-        UpdateBHistoryUi(_historyReader.TryReadForTickMap(MapNameB), logTransitions: true);
+        if (dryRunEvent.Decision == "live open")
+        {
+            _fillTracker.RecordOpenClick(ctx);
+        }
+        else if (dryRunEvent.Decision == "live close" && bTrades.Success && bTrades.Trades.Count > 0)
+        {
+            _fillTracker.RecordCloseClick(bTrades.Trades[0].Ticket, ctx);
+        }
     }
 
-    private void UpdateBTradeUi(TradeReadResult result, bool logTransitions)
+    private void ObserveFills(TradeReadResult bTrades, HistoryReadResult bHistory, MarketSnapshot snapshot)
+    {
+        var fills = _fillTracker.Observe(bTrades, bHistory, snapshot);
+        foreach (var fill in fills)
+        {
+            _csvLogger?.LogFill(fill);
+            var kind = fill.IsClose ? "close" : "open";
+            AddLog($"fill {kind} ticket={fill.Ticket} slippage={fill.SlippageMs}ms gapΔ={fill.DecideGap - fill.FillObservedGap} priceΔ={fill.SlippagePrice:F4}");
+        }
+    }
+
+private void UpdateBTradeUi(TradeReadResult result, bool logTransitions)
     {
         StatusBTrade = result.Success ? $"Connected: {result.Count} open" : $"Disconnected: {result.Error}";
         BTradeSummary = FormatTradeSummary(result);
