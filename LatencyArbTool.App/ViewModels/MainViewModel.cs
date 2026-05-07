@@ -243,9 +243,28 @@ private string _chartHwndText = string.Empty;
         var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs, feedASilenceMs, feedBSilenceMs, feedASeqDelta, feedBSeqDelta);
 
         _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread, (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0);
-        var thresholds = _stats.GetThresholds();
+        var rawThresholds = _stats.GetThresholds();
+
+        // Adaptive bias: shift OpenBuy / OpenSell deeper by the rolling-median
+        // slippage drift, so the bot fires earlier on a high-latency VPS and at
+        // the nominal threshold on a co-located VPS — same code, same config.
+        var driftBias = _fillTracker.OpenFillCount >= StrategyDefaults.SlippageWarmupMinFills
+            ? _fillTracker.MedianDriftMagnitude
+            : StrategyDefaults.SlippageDefaultBiasPts;
+        var thresholds = rawThresholds with
+        {
+            OpenBuy = rawThresholds.OpenBuy - driftBias,
+            OpenSell = rawThresholds.OpenSell + driftBias,
+        };
+
         var signal = _signalEngine.Evaluate(snapshot, thresholds);
-        var events = _clusterEngine.Step(snapshot, thresholds, signal);
+
+        // Broker live profit on the currently held cluster — fed to the engine
+        // so profit-target / loss-cap closes can fire independent of gap dynamics.
+        double? brokerProfit = bTrades.Success && bTrades.Trades.Count > 0
+            ? bTrades.Trades[0].Profit
+            : null;
+        var events = _clusterEngine.Step(snapshot, thresholds, signal, brokerProfit);
 
         UpdateMarketUi(snapshot, thresholds);
         LogInvalidLatencyWarnings(snapshot);

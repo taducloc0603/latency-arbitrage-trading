@@ -6,6 +6,7 @@ public sealed class DryRunClusterEngine
 {
     private long _nextClusterId = 1;
     private int _healthyATickCount;
+    private long _lastCloseAtMs;
 
     public BotState State { get; private set; } = BotState.Idle;
     public DryRunCluster? CurrentCluster { get; private set; }
@@ -13,7 +14,8 @@ public sealed class DryRunClusterEngine
     public IReadOnlyList<DryRunEvent> Step(
         MarketSnapshot snapshot,
         GapThresholds thresholds,
-        SignalSide? signal)
+        SignalSide? signal,
+        double? brokerProfitUsd = null)
     {
         var events = new List<DryRunEvent>();
 
@@ -30,7 +32,7 @@ public sealed class DryRunClusterEngine
             UpdateFloatingPnl(snapshot);
             UpdatePeakTrough(snapshot);
 
-            if (TryClose(snapshot, thresholds, events))
+            if (TryClose(snapshot, thresholds, events, brokerProfitUsd))
             {
                 return events;
             }
@@ -41,6 +43,21 @@ public sealed class DryRunClusterEngine
 
         if (State == BotState.Emergency)
         {
+            return events;
+        }
+
+        // Cooldown gate: previous run rejected ~50% of opens because the bot
+        // hammered "open" while MT5 was still settling the previous close.
+        if (_lastCloseAtMs > 0 && snapshot.NowMs - _lastCloseAtMs < StrategyDefaults.CooldownAfterCloseMs)
+        {
+            if (signal is SignalSide.BuyB or SignalSide.SellB)
+            {
+                events.Add(new DryRunEvent(
+                    "guard block",
+                    "cooldown after close",
+                    State,
+                    snapshot.NowMs));
+            }
             return events;
         }
 
@@ -63,6 +80,7 @@ public sealed class DryRunClusterEngine
         State = BotState.Idle;
         CurrentCluster = null;
         _healthyATickCount = 0;
+        _lastCloseAtMs = 0;
     }
 
     private void Open(MarketSnapshot snapshot, DryRunSide side, double price, List<DryRunEvent> events, string shadowReasons = "")
@@ -109,11 +127,31 @@ public sealed class DryRunClusterEngine
         }
     }
 
-    private bool TryClose(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events)
+    private bool TryClose(MarketSnapshot snapshot, GapThresholds thresholds, List<DryRunEvent> events, double? brokerProfitUsd)
     {
         if (CurrentCluster is null)
         {
             return false;
+        }
+
+        var closePriceForBuy = snapshot.B.Bid;
+        var closePriceForSell = snapshot.B.Ask;
+
+        // Profit target / loss cap: lock a slip-aided winner the moment broker
+        // profit clears the bar, and cut a slip-driven loser before it deepens.
+        // These bypass MinHold so they fire immediately after fill if applicable.
+        if (brokerProfitUsd.HasValue)
+        {
+            if (brokerProfitUsd.Value >= StrategyDefaults.ProfitTargetUsd)
+            {
+                Close(snapshot, CurrentCluster.Side == DryRunSide.BuyB ? closePriceForBuy : closePriceForSell, "profit target hit", events);
+                return true;
+            }
+            if (brokerProfitUsd.Value <= -StrategyDefaults.LossCapUsd)
+            {
+                Close(snapshot, CurrentCluster.Side == DryRunSide.BuyB ? closePriceForBuy : closePriceForSell, "loss cap hit", events);
+                return true;
+            }
         }
 
         var holdMs = snapshot.NowMs - CurrentCluster.OpenedAtMs;
@@ -192,6 +230,7 @@ public sealed class DryRunClusterEngine
 
         CurrentCluster = null;
         State = State == BotState.Emergency ? BotState.Emergency : BotState.Idle;
+        _lastCloseAtMs = snapshot.NowMs;
     }
 
     private void AddOrder(

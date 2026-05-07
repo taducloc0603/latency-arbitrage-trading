@@ -73,7 +73,15 @@ public sealed class LeadFollowSignalEngine
             return false;
         }
 
-        return IsStable(snapshot.GapBuy, _peakGapBuy.Value);
+        if (!IsStable(snapshot.GapBuy, _peakGapBuy.Value))
+        {
+            return false;
+        }
+
+        // Velocity gate: skip if gap is already drifting back toward zero. For
+        // a buy candidate the favorable direction is "more negative", so we
+        // require velocity below -MinFavorableVelocityPtsPerSec.
+        return thresholds.GapBuyVelocityPtsPerSec <= -StrategyDefaults.MinFavorableVelocityPtsPerSec;
     }
 
     private bool UpdateSell(MarketSnapshot snapshot, GapThresholds thresholds)
@@ -101,7 +109,14 @@ public sealed class LeadFollowSignalEngine
             return false;
         }
 
-        return IsStable(snapshot.GapSell, _peakGapSell.Value);
+        if (!IsStable(snapshot.GapSell, _peakGapSell.Value))
+        {
+            return false;
+        }
+
+        // Velocity gate: for a sell candidate, favorable direction is "more
+        // positive", so we require velocity above +MinFavorableVelocityPtsPerSec.
+        return thresholds.GapSellVelocityPtsPerSec >= StrategyDefaults.MinFavorableVelocityPtsPerSec;
     }
 
     private static bool IsStable(int currentGap, int peakGap)

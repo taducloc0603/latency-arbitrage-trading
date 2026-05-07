@@ -11,8 +11,29 @@ public sealed class FillTracker
 {
     private readonly Queue<ClickContext> _pendingOpens = new();
     private readonly Dictionary<ulong, ClickContext> _pendingCloses = new();
+    private readonly Queue<int> _recentDriftMagnitudes = new();
     private HashSet<ulong> _knownTickets = new();
     private bool _initialized;
+
+    // Number of open fills observed since (re)start. Caller uses this to decide
+    // whether MedianDriftMagnitude has enough samples to be trusted.
+    public int OpenFillCount { get; private set; }
+
+    // Median |decideGap - fillObservedGap| across the last
+    // StrategyDefaults.SlippageWindowFills opens. 0 if no fills yet.
+    public int MedianDriftMagnitude
+    {
+        get
+        {
+            if (_recentDriftMagnitudes.Count == 0)
+            {
+                return 0;
+            }
+            var sorted = _recentDriftMagnitudes.ToArray();
+            Array.Sort(sorted);
+            return sorted[sorted.Length / 2];
+        }
+    }
 
     public void RecordOpenClick(ClickContext context)
     {
@@ -63,7 +84,10 @@ public sealed class FillTracker
                 continue;
             }
 
-            events.Add(BuildOpenFill(match, trade, snapshot));
+            var fill = BuildOpenFill(match, trade, snapshot);
+            events.Add(fill);
+            RecordDrift(match.DecideGap - fill.FillObservedGap);
+            OpenFillCount++;
         }
 
         foreach (var ticket in _knownTickets)
@@ -90,8 +114,20 @@ public sealed class FillTracker
     {
         _pendingOpens.Clear();
         _pendingCloses.Clear();
+        _recentDriftMagnitudes.Clear();
         _knownTickets = new HashSet<ulong>();
         _initialized = false;
+        OpenFillCount = 0;
+    }
+
+    private void RecordDrift(int signedDrift)
+    {
+        var magnitude = Math.Abs(signedDrift);
+        _recentDriftMagnitudes.Enqueue(magnitude);
+        while (_recentDriftMagnitudes.Count > StrategyDefaults.SlippageWindowFills)
+        {
+            _recentDriftMagnitudes.Dequeue();
+        }
     }
 
     private ClickContext? DequeueMatchingOpen(TradeSide side)

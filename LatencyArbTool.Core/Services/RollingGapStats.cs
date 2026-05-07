@@ -23,6 +23,7 @@ public sealed class RollingGapStats
     public GapThresholds GetThresholds()
     {
         var aRangePoints = ComputeARangePoints();
+        var (gapBuyVel, gapSellVel) = ComputeGapVelocity(StrategyDefaults.VelocityWindowMs);
 
         if (_samples.Count < StrategyDefaults.WarmupMinSamples)
         {
@@ -38,7 +39,9 @@ public sealed class RollingGapStats
                 Median(_samples.Select(s => s.SpreadB)),
                 _samples.Count,
                 IsWarmup: true,
-                ARangePoints: aRangePoints);
+                ARangePoints: aRangePoints,
+                GapBuyVelocityPtsPerSec: gapBuyVel,
+                GapSellVelocityPtsPerSec: gapSellVel);
         }
 
         var buys = _samples.Select(s => (double)s.GapBuy).ToArray();
@@ -63,7 +66,44 @@ public sealed class RollingGapStats
             Median(_samples.Select(s => s.SpreadB)),
             _samples.Count,
             IsWarmup: false,
-            ARangePoints: aRangePoints);
+            ARangePoints: aRangePoints,
+            GapBuyVelocityPtsPerSec: gapBuyVel,
+            GapSellVelocityPtsPerSec: gapSellVel);
+    }
+
+    // Linear slope of GapBuy / GapSell over the last `windowMs` of samples, in
+    // points/sec. Negative buy velocity = gap getting more negative = widening
+    // in the favorable direction for a buy candidate. Positive sell velocity =
+    // gap getting more positive = widening for a sell candidate.
+    private (double gapBuyVel, double gapSellVel) ComputeGapVelocity(long windowMs)
+    {
+        if (_samples.Count < 2)
+        {
+            return (0, 0);
+        }
+        var latest = _samples.Last();
+        var cutoff = latest.TimestampMs - windowMs;
+        GapSample? oldest = null;
+        foreach (var s in _samples)
+        {
+            if (s.TimestampMs >= cutoff)
+            {
+                oldest = s;
+                break;
+            }
+        }
+        if (oldest is null)
+        {
+            return (0, 0);
+        }
+        var dtSec = (latest.TimestampMs - oldest.TimestampMs) / 1000.0;
+        if (dtSec < 0.01)
+        {
+            return (0, 0);
+        }
+        return (
+            (latest.GapBuy - oldest.GapBuy) / dtSec,
+            (latest.GapSell - oldest.GapSell) / dtSec);
     }
 
     private int ComputeARangePoints()

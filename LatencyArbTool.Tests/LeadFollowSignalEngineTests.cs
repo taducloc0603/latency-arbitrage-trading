@@ -79,7 +79,9 @@ public sealed class LeadFollowSignalEngineTests
 
     private static GapThresholds Thresholds()
     {
-        return new GapThresholds(-50, 30, -15, 20, 0, 0, 10, 10, 1, 500, false);
+        return new GapThresholds(-50, 30, -15, 20, 0, 0, 10, 10, 1, 500, false,
+            GapBuyVelocityPtsPerSec: -100,
+            GapSellVelocityPtsPerSec: 100);
     }
 
     private static MarketSnapshot Snapshot(long nowMs, int gapBuy, int gapSell)

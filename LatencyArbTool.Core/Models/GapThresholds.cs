@@ -12,5 +12,6 @@ public sealed record GapThresholds(
     double MedianSpreadB,
     int SampleCount,
     bool IsWarmup,
-    int ARangePoints = int.MaxValue);
-
+    int ARangePoints = int.MaxValue,
+    double GapBuyVelocityPtsPerSec = 0,
+    double GapSellVelocityPtsPerSec = 0);

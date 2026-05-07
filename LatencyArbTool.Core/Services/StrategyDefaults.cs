@@ -34,4 +34,28 @@ public static class StrategyDefaults
 
     public const int LotBandOneMaxGap = 60;
     public const int LotBandTwoMaxGap = 70;
+
+    // Adaptive slippage compensation: bias OpenBuy/OpenSell by the rolling-median
+    // gap drift between decide-click and broker-fill. Same code works on both a
+    // VN VPS (large drift) and a London VPS (small drift) — threshold auto-shifts.
+    public const int SlippageWindowFills = 30;
+    public const int SlippageWarmupMinFills = 5;
+    public const int SlippageDefaultBiasPts = 30;
+
+    // Velocity filter: skip "stuck" gaps that are about to revert. Measured as
+    // points/sec slope of gap over a short window. Favorable direction is more
+    // negative for buy candidates, more positive for sell candidates.
+    public const int VelocityWindowMs = 200;
+    public const double MinFavorableVelocityPtsPerSec = 30.0;
+
+    // Cool-down between close and the next open click — prevents the bot from
+    // hammering open while MT5 is still processing the previous close, which
+    // produced ~50% rejection rate ("B trade already open") in earlier runs.
+    public const int CooldownAfterCloseMs = 750;
+
+    // Profit target / loss cap close based on broker's live profit (USD).
+    // Independent of gap-revert / A-reversal, so a slip-aided winner is locked
+    // in fast and a slip-driven loser is cut before it deepens.
+    public const double ProfitTargetUsd = 30.0;
+    public const double LossCapUsd = 50.0;
 }
