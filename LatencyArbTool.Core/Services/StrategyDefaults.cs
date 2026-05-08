@@ -40,13 +40,18 @@ public static class StrategyDefaults
     // VN VPS (large drift) and a London VPS (small drift) — threshold auto-shifts.
     public const int SlippageWindowFills = 30;
     public const int SlippageWarmupMinFills = 5;
-    public const int SlippageDefaultBiasPts = 30;
+    // 0 = no bias before measurement. Avoids the chicken-and-egg trap where a
+    // big default bias (e.g. 30 pts) makes threshold so deep that no fills ever
+    // happen, so the median is never measured. Once 5+ fills accumulate the
+    // measured median takes over automatically.
+    public const int SlippageDefaultBiasPts = 0;
 
-    // Velocity filter: skip "stuck" gaps that are about to revert. Measured as
-    // points/sec slope of gap over a short window. Favorable direction is more
-    // negative for buy candidates, more positive for sell candidates.
+    // Velocity filter: skip "stuck" gaps that are about to revert. Negative
+    // value = filter effectively disabled (only excludes gap *contracting*
+    // faster than this rate). Tighten upward (e.g. +30) once base volume looks
+    // healthy and we can afford to drop the weakest signals.
     public const int VelocityWindowMs = 200;
-    public const double MinFavorableVelocityPtsPerSec = 30.0;
+    public const double MinFavorableVelocityPtsPerSec = -100.0;
 
     // Cool-down between close and the next open click — prevents the bot from
     // hammering open while MT5 is still processing the previous close, which
