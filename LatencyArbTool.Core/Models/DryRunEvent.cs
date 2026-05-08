@@ -13,4 +13,7 @@ public sealed record DryRunEvent(
     double Lot = 0,
     double PnlRaw = 0,
     long HoldMs = 0,
-    string ShadowBlockReasons = "");
+    string ShadowBlockReasons = "",
+    double PeakBidB = 0,
+    double TroughAskB = 0,
+    bool TrailingActive = false);

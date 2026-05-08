@@ -180,6 +180,68 @@ public sealed class DryRunClusterEngineTests
         Assert.Contains(events, e => e.Decision == "live open" && e.ShadowBlockReasons.Contains("A volatility low"));
     }
 
+    [Fact]
+    public void Step_TrailingEngagesAfterGapRevertWithProfit()
+    {
+        var engine = new DryRunClusterEngine();
+        engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, bidB: 100, askB: 101), Thresholds(), SignalSide.BuyB);
+
+        // After MinHold, gap reverted, broker reports profit ≥ activation: trailing engages but does NOT close.
+        var events = engine.Step(
+            Snapshot(StrategyDefaults.MinHoldMs, gapBuy: -10, gapSell: 0, bidB: 102, askB: 103),
+            Thresholds(),
+            null,
+            brokerProfitUsd: 10.0);
+
+        Assert.NotNull(engine.CurrentCluster);
+        Assert.True(engine.CurrentCluster!.TrailingActive);
+        Assert.Contains(events, e => e.Decision == "trailing engaged");
+        Assert.DoesNotContain(events, e => e.Decision == "live close");
+    }
+
+    [Fact]
+    public void Step_TrailingClosesOnRetrace()
+    {
+        var engine = new DryRunClusterEngine();
+        engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, bidB: 100, askB: 101), Thresholds(), SignalSide.BuyB);
+
+        // Tick that engages trailing: gap reverted, profit ≥ activation, B.Bid lifted to 102 (peak).
+        engine.Step(
+            Snapshot(StrategyDefaults.MinHoldMs, gapBuy: -10, gapSell: 0, bidB: 102, askB: 103),
+            Thresholds(),
+            null,
+            brokerProfitUsd: 10.0);
+
+        // Next tick: B.Bid retraces by TrailingDistanceUsd from peak → trailing close.
+        var retraceBid = 102.0 - StrategyDefaults.TrailingDistanceUsd - 0.01;
+        var events = engine.Step(
+            Snapshot(StrategyDefaults.MinHoldMs + 100, gapBuy: -10, gapSell: 0, bidB: retraceBid, askB: retraceBid + 1),
+            Thresholds(),
+            null,
+            brokerProfitUsd: 5.0);
+
+        Assert.Null(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "live close" && e.Reason == "buy trailing stop hit");
+    }
+
+    [Fact]
+    public void Step_TrailingDoesNotEngageWithoutProfit()
+    {
+        var engine = new DryRunClusterEngine();
+        engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, bidB: 100, askB: 101), Thresholds(), SignalSide.BuyB);
+
+        // Gap reverted but no broker profit info → trailing must NOT engage and the
+        // legacy gap-revert close fires as before.
+        var events = engine.Step(
+            Snapshot(StrategyDefaults.MinHoldMs, gapBuy: -10, gapSell: 0, bidB: 100, askB: 101),
+            Thresholds(),
+            null,
+            brokerProfitUsd: null);
+
+        Assert.Null(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "live close" && e.Reason == "buy gap reverted");
+    }
+
     private static GapThresholds Thresholds()
     {
         return new GapThresholds(-50, 30, -15, 20, 0, 0, 10, 10, 1, 500, false);

@@ -63,4 +63,11 @@ public static class StrategyDefaults
     // in fast and a slip-driven loser is cut before it deepens.
     public const double ProfitTargetUsd = 30.0;
     public const double LossCapUsd = 50.0;
+
+    // Trailing stop on B price: when gap has reverted (thesis met) AND broker
+    // profit cleared TrailingActivateProfitUsd, the cluster switches into
+    // trailing mode — it holds until B retraces by TrailingDistanceUsd from the
+    // peak (BUY) / trough (SELL). Lets winners run if A keeps moving.
+    public const double TrailingDistanceUsd = 0.30;
+    public const double TrailingActivateProfitUsd = 5.0;
 }

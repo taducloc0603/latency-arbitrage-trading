@@ -26,7 +26,7 @@ public sealed class CsvLogger : IDisposable
 
         _ticks.WriteLine("timestamp,bidA,askA,bidB,askB,spreadA,spreadB,latencyA,latencyASource,latencyB,latencyBSource,gapBuy,gapSell,openBuyThreshold,openSellThreshold,medianBuy,medianSell,stdBuy,stdSell,medianSpreadB,aRangePoints,sampleCount,isWarmup,feedASilenceMs,feedBSilenceMs,feedASeqDelta,feedBSeqDelta");
         _decisions.WriteLine("timestamp,state,decision,reason,gapBuy,gapSell,openBuyThreshold,openSellThreshold,medianBuy,medianSell,stdBuy,stdSell,medianSpreadB,spreadB,aRangePoints,feedASilenceMs,feedBSilenceMs,shadowBlockReasons");
-        _clusters.WriteLine("clusterId,event,side,orderCount,openPrice,closePrice,lot,pnlRaw,holdMs,closeReason,shadowBlockReasons");
+        _clusters.WriteLine("clusterId,event,side,orderCount,openPrice,closePrice,lot,pnlRaw,holdMs,closeReason,shadowBlockReasons,peakBidB,troughAskB,trailingActive");
         _signal.WriteLine("timestamp,gapBuy,gapSell,openBuyThreshold,openSellThreshold,extremeSinceBuyMs,confirmReachedBuyMs,peakGapBuy,extremeSinceSellMs,confirmReachedSellMs,peakGapSell,signalReturned");
         _fills.WriteLine("kind,ticket,clusterId,side,decideTimeMs,fillTimeMs,slippageMs,decideGap,fillObservedGap,decidePrice,fillPrice,slippagePrice");
     }
@@ -98,7 +98,10 @@ public sealed class CsvLogger : IDisposable
                 F(dryRunEvent.PnlRaw),
                 dryRunEvent.HoldMs,
                 Escape(dryRunEvent.Reason),
-                Escape(dryRunEvent.ShadowBlockReasons)));
+                Escape(dryRunEvent.ShadowBlockReasons),
+                F(dryRunEvent.PeakBidB),
+                F(dryRunEvent.TroughAskB),
+                dryRunEvent.TrailingActive));
         }
     }
 

@@ -90,7 +90,9 @@ public sealed class DryRunClusterEngine
             side,
             snapshot.NowMs,
             snapshot.A.Ask,
-            snapshot.A.Bid);
+            snapshot.A.Bid,
+            snapshot.B.Bid,
+            snapshot.B.Ask);
 
         CurrentCluster = cluster;
         State = BotState.Holding;
@@ -173,9 +175,38 @@ public sealed class DryRunClusterEngine
             {
                 reason = "A ask reversal";
             }
-            else if (snapshot.GapBuy >= thresholds.CloseBuyRevert)
+            else
             {
-                reason = "buy gap reverted";
+                var gapReverted = snapshot.GapBuy >= thresholds.CloseBuyRevert;
+
+                // Engage trailing on first gap-revert tick that also clears the
+                // profit gate. Once active, the close trigger is a B-side
+                // retrace from PeakBidB rather than gap-revert / A-reversal.
+                if (!CurrentCluster.TrailingActive
+                    && gapReverted
+                    && brokerProfitUsd.HasValue
+                    && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
+                {
+                    CurrentCluster.TrailingActive = true;
+                    events.Add(new DryRunEvent(
+                        "trailing engaged",
+                        "buy gap reverted, trailing started",
+                        State,
+                        snapshot.NowMs,
+                        CurrentCluster.ClusterId,
+                        CurrentCluster.Side,
+                        CurrentCluster.Orders.Count));
+                }
+
+                if (CurrentCluster.TrailingActive
+                    && snapshot.B.Bid <= CurrentCluster.PeakBidB - StrategyDefaults.TrailingDistanceUsd)
+                {
+                    reason = "buy trailing stop hit";
+                }
+                else if (!CurrentCluster.TrailingActive && gapReverted)
+                {
+                    reason = "buy gap reverted";
+                }
             }
         }
         else
@@ -185,9 +216,35 @@ public sealed class DryRunClusterEngine
             {
                 reason = "A bid reversal";
             }
-            else if (snapshot.GapSell <= thresholds.CloseSellRevert)
+            else
             {
-                reason = "sell gap reverted";
+                var gapReverted = snapshot.GapSell <= thresholds.CloseSellRevert;
+
+                if (!CurrentCluster.TrailingActive
+                    && gapReverted
+                    && brokerProfitUsd.HasValue
+                    && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
+                {
+                    CurrentCluster.TrailingActive = true;
+                    events.Add(new DryRunEvent(
+                        "trailing engaged",
+                        "sell gap reverted, trailing started",
+                        State,
+                        snapshot.NowMs,
+                        CurrentCluster.ClusterId,
+                        CurrentCluster.Side,
+                        CurrentCluster.Orders.Count));
+                }
+
+                if (CurrentCluster.TrailingActive
+                    && snapshot.B.Ask >= CurrentCluster.TroughAskB + StrategyDefaults.TrailingDistanceUsd)
+                {
+                    reason = "sell trailing stop hit";
+                }
+                else if (!CurrentCluster.TrailingActive && gapReverted)
+                {
+                    reason = "sell gap reverted";
+                }
             }
         }
 
@@ -226,7 +283,10 @@ public sealed class DryRunClusterEngine
             cluster.Orders.Count,
             ClosePrice: closePrice,
             PnlRaw: pnl,
-            HoldMs: snapshot.NowMs - cluster.OpenedAtMs));
+            HoldMs: snapshot.NowMs - cluster.OpenedAtMs,
+            PeakBidB: cluster.PeakBidB,
+            TroughAskB: cluster.TroughAskB,
+            TrailingActive: cluster.TrailingActive));
 
         CurrentCluster = null;
         State = State == BotState.Emergency ? BotState.Emergency : BotState.Idle;
@@ -347,6 +407,8 @@ public sealed class DryRunClusterEngine
 
         CurrentCluster.PeakAskA = Math.Max(CurrentCluster.PeakAskA, snapshot.A.Ask);
         CurrentCluster.TroughBidA = Math.Min(CurrentCluster.TroughBidA, snapshot.A.Bid);
+        CurrentCluster.PeakBidB = Math.Max(CurrentCluster.PeakBidB, snapshot.B.Bid);
+        CurrentCluster.TroughAskB = Math.Min(CurrentCluster.TroughAskB, snapshot.B.Ask);
     }
 
     private void UpdateFloatingPnl(MarketSnapshot snapshot)
