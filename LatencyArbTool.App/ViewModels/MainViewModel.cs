@@ -23,6 +23,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly SequenceTracker _feedASeq = new();
     private readonly SequenceTracker _feedBSeq = new();
     private readonly FillTracker _fillTracker = new();
+    // Pending close tracking: after a close click is sent we wait for the
+    // ticket to leave the trades map. If it lingers past the retry threshold
+    // we re-fire the close to avoid the 89-second "stuck close" outlier that
+    // caused 62% of run 5's loss.
+    private ulong? _pendingCloseTicket;
+    private long? _pendingCloseSentAtTickMs;
+    private int _closeRetryCount;
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
     private bool _isRunning;
@@ -209,6 +216,9 @@ private string _chartHwndText = string.Empty;
         _feedASeq.Reset();
         _feedBSeq.Reset();
         _fillTracker.Reset();
+        _pendingCloseTicket = null;
+        _pendingCloseSentAtTickMs = null;
+        _closeRetryCount = 0;
         UpdateClusterUi();
         AddLog("reset live state");
     }
@@ -286,6 +296,56 @@ private string _chartHwndText = string.Empty;
         }
 
         ObserveFills(bTrades, bHistory, snapshot);
+        HandlePendingCloseRetry(bTrades);
+    }
+
+    private void HandlePendingCloseRetry(TradeReadResult bTrades)
+    {
+        if (!_pendingCloseTicket.HasValue || !_pendingCloseSentAtTickMs.HasValue)
+        {
+            return;
+        }
+
+        var ticketStillOpen = bTrades.Success
+            && bTrades.Trades.Any(t => t.Ticket == _pendingCloseTicket.Value);
+
+        if (!ticketStillOpen)
+        {
+            // Broker confirmed the close — clear pending state.
+            if (_closeRetryCount > 0)
+            {
+                AddLog($"close confirmed for ticket {_pendingCloseTicket} after {_closeRetryCount} retr{(_closeRetryCount == 1 ? "y" : "ies")}");
+            }
+            _pendingCloseTicket = null;
+            _pendingCloseSentAtTickMs = null;
+            _closeRetryCount = 0;
+            return;
+        }
+
+        var sinceClickMs = Environment.TickCount64 - _pendingCloseSentAtTickMs.Value;
+        if (sinceClickMs < StrategyDefaults.CloseRetryThresholdMs)
+        {
+            return;
+        }
+
+        if (_closeRetryCount >= StrategyDefaults.CloseRetryMax)
+        {
+            return;
+        }
+
+        var trade = bTrades.Trades.First(t => t.Ticket == _pendingCloseTicket.Value);
+        var side = trade.Side == TradeSide.Buy ? DryRunSide.BuyB : DryRunSide.SellB;
+        var retryEvent = new DryRunEvent(
+            "live close",
+            "close retry",
+            LatencyArbTool.Core.Models.BotState.Holding,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Side: side);
+
+        var result = _tradeExecutor.Execute(retryEvent, ChartHwndText, TradeHwndText, bTrades);
+        _closeRetryCount++;
+        _pendingCloseSentAtTickMs = Environment.TickCount64;
+        AddLog($"close retry #{_closeRetryCount} for ticket {_pendingCloseTicket} (sat {sinceClickMs}ms): {result.Message}");
     }
 
     private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent, MarketSnapshot snapshot, TradeReadResult bTrades, HistoryReadResult bHistory)
@@ -332,6 +392,9 @@ private string _chartHwndText = string.Empty;
         else if (dryRunEvent.Decision == "live close" && bTrades.Success && bTrades.Trades.Count > 0)
         {
             _fillTracker.RecordCloseClick(bTrades.Trades[0].Ticket, ctx);
+            _pendingCloseTicket = bTrades.Trades[0].Ticket;
+            _pendingCloseSentAtTickMs = Environment.TickCount64;
+            _closeRetryCount = 0;
         }
     }
 

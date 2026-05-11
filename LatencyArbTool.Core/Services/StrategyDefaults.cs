@@ -62,12 +62,29 @@ public static class StrategyDefaults
     // Independent of gap-revert / A-reversal, so a slip-aided winner is locked
     // in fast and a slip-driven loser is cut before it deepens.
     public const double ProfitTargetUsd = 30.0;
-    public const double LossCapUsd = 50.0;
+    // Tightened from $50 to $10 after run 5 showed actual win/loss range is
+    // $0-$10, not $40-$90 as in earlier high-lot runs. A $50 cap rarely fires
+    // and lets bad trades deepen — $10 cuts losers near the avg-loss level.
+    public const double LossCapUsd = 10.0;
 
     // Trailing stop on B price: when gap has reverted (thesis met) AND broker
     // profit cleared TrailingActivateProfitUsd, the cluster switches into
     // trailing mode — it holds until B retraces by TrailingDistanceUsd from the
     // peak (BUY) / trough (SELL). Lets winners run if A keeps moving.
-    public const double TrailingDistanceUsd = 0.30;
-    public const double TrailingActivateProfitUsd = 5.0;
+    //
+    // Activation lowered $5 → $0.5 after run 5 showed max profit on the new
+    // (small-lot) broker was $4 — the old $5 gate meant trailing never engaged.
+    // Distance tightened $0.30 → $0.20 to give back less profit when B retraces.
+    public const double TrailingDistanceUsd = 0.20;
+    public const double TrailingActivateProfitUsd = 0.5;
+
+    // Close-confirmation retry: run 5 trade 11 saw bot click close at t=3.5s
+    // but broker only processed it at t=89s, costing $17.79 (62% of total loss).
+    // After sending a close click, we wait CloseRetryThresholdMs for the ticket
+    // to leave the trades map. If it's still there, we re-fire the close click
+    // up to CloseRetryMax times. ClosePositionMt5(row=0) is idempotent and
+    // ValidateBTradeState rejects retries once the position is gone, so this
+    // is safe even if the original click eventually goes through.
+    public const int CloseRetryThresholdMs = 1500;
+    public const int CloseRetryMax = 5;
 }
