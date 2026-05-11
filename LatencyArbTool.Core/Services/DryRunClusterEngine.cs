@@ -168,42 +168,45 @@ public sealed class DryRunClusterEngine
         string? reason = null;
         var closePrice = 0.0;
 
+        // Engage trailing as soon as broker reports profit ≥ activation threshold.
+        // No gap-revert requirement — the user's hint is "if price keeps moving
+        // favorably after entering, hold and let the trailing stop manage exit",
+        // so we activate trailing the moment we're in profit, regardless of gap.
+        if (!CurrentCluster.TrailingActive
+            && brokerProfitUsd.HasValue
+            && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
+        {
+            CurrentCluster.TrailingActive = true;
+            events.Add(new DryRunEvent(
+                "trailing engaged",
+                $"profit ${brokerProfitUsd.Value:F2} ≥ ${StrategyDefaults.TrailingActivateProfitUsd:F2}",
+                State,
+                snapshot.NowMs,
+                CurrentCluster.ClusterId,
+                CurrentCluster.Side,
+                CurrentCluster.Orders.Count));
+        }
+
         if (CurrentCluster.Side == DryRunSide.BuyB)
         {
             closePrice = snapshot.B.Bid;
-            if (snapshot.A.Ask <= CurrentCluster.PeakAskA - StrategyDefaults.AReversalUsd)
-            {
-                reason = "A ask reversal";
-            }
-            else
-            {
-                var gapReverted = snapshot.GapBuy >= thresholds.CloseBuyRevert;
 
-                // Engage trailing on first gap-revert tick that also clears the
-                // profit gate. Once active, the close trigger is a B-side
-                // retrace from PeakBidB rather than gap-revert / A-reversal.
-                if (!CurrentCluster.TrailingActive
-                    && gapReverted
-                    && brokerProfitUsd.HasValue
-                    && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
-                {
-                    CurrentCluster.TrailingActive = true;
-                    events.Add(new DryRunEvent(
-                        "trailing engaged",
-                        "buy gap reverted, trailing started",
-                        State,
-                        snapshot.NowMs,
-                        CurrentCluster.ClusterId,
-                        CurrentCluster.Side,
-                        CurrentCluster.Orders.Count));
-                }
-
-                if (CurrentCluster.TrailingActive
-                    && snapshot.B.Bid <= CurrentCluster.PeakBidB - StrategyDefaults.TrailingDistanceUsd)
+            if (CurrentCluster.TrailingActive)
+            {
+                // Trailing-active mode: only B retrace can close. A-reversal and
+                // gap-revert are suppressed so a continuing favorable move runs.
+                if (snapshot.B.Bid <= CurrentCluster.PeakBidB - StrategyDefaults.TrailingDistanceUsd)
                 {
                     reason = "buy trailing stop hit";
                 }
-                else if (!CurrentCluster.TrailingActive && gapReverted)
+            }
+            else
+            {
+                if (snapshot.A.Ask <= CurrentCluster.PeakAskA - StrategyDefaults.AReversalUsd)
+                {
+                    reason = "A ask reversal";
+                }
+                else if (snapshot.GapBuy >= thresholds.CloseBuyRevert)
                 {
                     reason = "buy gap reverted";
                 }
@@ -212,36 +215,21 @@ public sealed class DryRunClusterEngine
         else
         {
             closePrice = snapshot.B.Ask;
-            if (snapshot.A.Bid >= CurrentCluster.TroughBidA + StrategyDefaults.AReversalUsd)
-            {
-                reason = "A bid reversal";
-            }
-            else
-            {
-                var gapReverted = snapshot.GapSell <= thresholds.CloseSellRevert;
 
-                if (!CurrentCluster.TrailingActive
-                    && gapReverted
-                    && brokerProfitUsd.HasValue
-                    && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
-                {
-                    CurrentCluster.TrailingActive = true;
-                    events.Add(new DryRunEvent(
-                        "trailing engaged",
-                        "sell gap reverted, trailing started",
-                        State,
-                        snapshot.NowMs,
-                        CurrentCluster.ClusterId,
-                        CurrentCluster.Side,
-                        CurrentCluster.Orders.Count));
-                }
-
-                if (CurrentCluster.TrailingActive
-                    && snapshot.B.Ask >= CurrentCluster.TroughAskB + StrategyDefaults.TrailingDistanceUsd)
+            if (CurrentCluster.TrailingActive)
+            {
+                if (snapshot.B.Ask >= CurrentCluster.TroughAskB + StrategyDefaults.TrailingDistanceUsd)
                 {
                     reason = "sell trailing stop hit";
                 }
-                else if (!CurrentCluster.TrailingActive && gapReverted)
+            }
+            else
+            {
+                if (snapshot.A.Bid >= CurrentCluster.TroughBidA + StrategyDefaults.AReversalUsd)
+                {
+                    reason = "A bid reversal";
+                }
+                else if (snapshot.GapSell <= thresholds.CloseSellRevert)
                 {
                     reason = "sell gap reverted";
                 }
