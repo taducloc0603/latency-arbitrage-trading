@@ -81,7 +81,15 @@ public sealed class LeadFollowSignalEngine
         // Velocity gate: skip if gap is already drifting back toward zero. For
         // a buy candidate the favorable direction is "more negative", so we
         // require velocity below -MinFavorableVelocityPtsPerSec.
-        return thresholds.GapBuyVelocityPtsPerSec <= -StrategyDefaults.MinFavorableVelocityPtsPerSec;
+        if (thresholds.GapBuyVelocityPtsPerSec > -StrategyDefaults.MinFavorableVelocityPtsPerSec)
+        {
+            return false;
+        }
+
+        // Lead-detection gate: BUY thesis is "B will rise to match A". For that
+        // to hold, A must have moved up recently and led B. If B moved instead
+        // (B-led gap), the bet is wrong direction — skip.
+        return LeadIsA(expectAPositive: true, thresholds);
     }
 
     private bool UpdateSell(MarketSnapshot snapshot, GapThresholds thresholds)
@@ -116,7 +124,36 @@ public sealed class LeadFollowSignalEngine
 
         // Velocity gate: for a sell candidate, favorable direction is "more
         // positive", so we require velocity above +MinFavorableVelocityPtsPerSec.
-        return thresholds.GapSellVelocityPtsPerSec >= StrategyDefaults.MinFavorableVelocityPtsPerSec;
+        if (thresholds.GapSellVelocityPtsPerSec < StrategyDefaults.MinFavorableVelocityPtsPerSec)
+        {
+            return false;
+        }
+
+        // Lead-detection gate: SELL thesis is "B will fall to match A". For that
+        // to hold, A must have moved down recently and led B. If B moved instead
+        // (B-led gap), the bet is wrong direction — skip.
+        return LeadIsA(expectAPositive: false, thresholds);
+    }
+
+    // Verifies A drove the move that produced the gap, in the direction the
+    // trade thesis expects. expectAPositive=true means A should have risen (BUY
+    // thesis); false means A should have fallen (SELL thesis). |A move| must
+    // also dominate |B move| by LeadRatio to rule out B-led gaps.
+    private static bool LeadIsA(bool expectAPositive, GapThresholds thresholds)
+    {
+        var aChange = thresholds.MidAChangePtsInWindow;
+        var bChange = thresholds.MidBChangePtsInWindow;
+
+        if (expectAPositive)
+        {
+            if (aChange < StrategyDefaults.MinLeadChangePts) return false;
+        }
+        else
+        {
+            if (aChange > -StrategyDefaults.MinLeadChangePts) return false;
+        }
+
+        return Math.Abs(aChange) >= Math.Abs(bChange) * StrategyDefaults.LeadRatio;
     }
 
     private static bool IsStable(int currentGap, int peakGap)

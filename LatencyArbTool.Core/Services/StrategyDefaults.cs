@@ -8,8 +8,13 @@ public static class StrategyDefaults
     public const double KStd = 2.0;
 
     public const int WarmupMinSamples = 100;
-    public const int FixedOpenBuyFallback = -75;
-    public const int FixedOpenSellFallback = 65;
+    // Loosened back from -75/+65 toward the original -50/+40 zone now that
+    // slippage on the new broker is ~0 pts (run 5 confirmed). Run 1 showed
+    // the |gap| 50-75 bucket had a positive edge but was poisoned by 51-pt
+    // slippage drift. With slippage solved, this zone should be profitable
+    // — and triggers far more trades than -75/+65.
+    public const int FixedOpenBuyFallback = -55;
+    public const int FixedOpenSellFallback = 50;
 
     public const int ConfirmMs = 200;
     public const int ReCheckMs = 100;
@@ -87,4 +92,15 @@ public static class StrategyDefaults
     // is safe even if the original click eventually goes through.
     public const int CloseRetryThresholdMs = 1500;
     public const int CloseRetryMax = 5;
+
+    // Lead detection: the strategy's edge requires A to lead the move that
+    // produced the gap. When B leads instead (e.g. broker B quote jumps before
+    // the rest of the market), gap looks the same but the bet is wrong and the
+    // trade typically loses. To filter:
+    //   1) A must have moved at least MinLeadChangePts in the velocity window
+    //      AND in the direction that matches the trade thesis
+    //      (positive for BUY = expect B to rise; negative for SELL = expect B to fall).
+    //   2) |A move| must be at least LeadRatio × |B move| so A clearly led.
+    public const int MinLeadChangePts = 15;
+    public const double LeadRatio = 1.5;
 }

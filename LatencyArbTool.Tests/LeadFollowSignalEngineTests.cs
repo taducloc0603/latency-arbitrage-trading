@@ -11,7 +11,7 @@ public sealed class LeadFollowSignalEngineTests
     public void Evaluate_BuyRequiresContinuousConfirmation()
     {
         var engine = new LeadFollowSignalEngine();
-        var thresholds = Thresholds();
+        var thresholds = BuyFriendlyThresholds();
 
         Assert.Null(engine.Evaluate(Snapshot(0, gapBuy: -60, gapSell: 0), thresholds));
         Assert.Null(engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs - 1, gapBuy: -60, gapSell: 0), thresholds));
@@ -23,7 +23,7 @@ public sealed class LeadFollowSignalEngineTests
     public void Evaluate_SellRequiresContinuousConfirmation()
     {
         var engine = new LeadFollowSignalEngine();
-        var thresholds = Thresholds();
+        var thresholds = SellFriendlyThresholds();
 
         Assert.Null(engine.Evaluate(Snapshot(0, gapBuy: 0, gapSell: 40), thresholds));
         Assert.Null(engine.Evaluate(Snapshot(StrategyDefaults.ConfirmMs, gapBuy: 0, gapSell: 40), thresholds));
@@ -57,7 +57,7 @@ public sealed class LeadFollowSignalEngineTests
     public void Evaluate_AllowsWhenGapStaysNearPeak()
     {
         var engine = new LeadFollowSignalEngine();
-        var thresholds = Thresholds();
+        var thresholds = BuyFriendlyThresholds();
 
         // Peak -100, current -85 = 85% of peak (above 70% ratio)
         Assert.Null(engine.Evaluate(Snapshot(0, gapBuy: -100, gapSell: 0), thresholds));
@@ -79,9 +79,33 @@ public sealed class LeadFollowSignalEngineTests
 
     private static GapThresholds Thresholds()
     {
+        // Default thresholds for signal-engine tests: favorable velocity in both
+        // directions and an A-led move (|A| >> |B|) so the lead-detection gate
+        // passes. Each test that expects signal to fire relies on this default;
+        // tests that expect null fail on a different gate before lead-detection.
         return new GapThresholds(-50, 30, -15, 20, 0, 0, 10, 10, 1, 500, false,
             GapBuyVelocityPtsPerSec: -100,
-            GapSellVelocityPtsPerSec: 100);
+            GapSellVelocityPtsPerSec: 100,
+            MidAChangePtsInWindow: 0,
+            MidBChangePtsInWindow: 0);
+    }
+
+    private static GapThresholds BuyFriendlyThresholds()
+    {
+        return Thresholds() with
+        {
+            MidAChangePtsInWindow = 60,   // A rose 60 pts
+            MidBChangePtsInWindow = 10,   // B barely moved
+        };
+    }
+
+    private static GapThresholds SellFriendlyThresholds()
+    {
+        return Thresholds() with
+        {
+            MidAChangePtsInWindow = -60,  // A fell 60 pts
+            MidBChangePtsInWindow = -10,  // B barely moved
+        };
     }
 
     private static MarketSnapshot Snapshot(long nowMs, int gapBuy, int gapSell)

@@ -14,9 +14,9 @@ public sealed class RollingGapStats
 
     public int Count => _samples.Count;
 
-    public void Add(long timestampMs, int gapBuy, int gapSell, double spreadB, double midA = double.NaN)
+    public void Add(long timestampMs, int gapBuy, int gapSell, double spreadB, double midA = double.NaN, double midB = double.NaN)
     {
-        _samples.Enqueue(new GapSample(timestampMs, gapBuy, gapSell, spreadB, midA));
+        _samples.Enqueue(new GapSample(timestampMs, gapBuy, gapSell, spreadB, midA, midB));
         Trim(timestampMs);
     }
 
@@ -24,6 +24,7 @@ public sealed class RollingGapStats
     {
         var aRangePoints = ComputeARangePoints();
         var (gapBuyVel, gapSellVel) = ComputeGapVelocity(StrategyDefaults.VelocityWindowMs);
+        var (midAChange, midBChange) = ComputeMidChange(StrategyDefaults.VelocityWindowMs);
 
         if (_samples.Count < StrategyDefaults.WarmupMinSamples)
         {
@@ -41,7 +42,9 @@ public sealed class RollingGapStats
                 IsWarmup: true,
                 ARangePoints: aRangePoints,
                 GapBuyVelocityPtsPerSec: gapBuyVel,
-                GapSellVelocityPtsPerSec: gapSellVel);
+                GapSellVelocityPtsPerSec: gapSellVel,
+                MidAChangePtsInWindow: midAChange,
+                MidBChangePtsInWindow: midBChange);
         }
 
         var buys = _samples.Select(s => (double)s.GapBuy).ToArray();
@@ -68,7 +71,42 @@ public sealed class RollingGapStats
             IsWarmup: false,
             ARangePoints: aRangePoints,
             GapBuyVelocityPtsPerSec: gapBuyVel,
-            GapSellVelocityPtsPerSec: gapSellVel);
+            GapSellVelocityPtsPerSec: gapSellVel,
+            MidAChangePtsInWindow: midAChange,
+            MidBChangePtsInWindow: midBChange);
+    }
+
+    // Signed change of midA and midB over the last `windowMs`, in points (1pt = 0.01 USD).
+    // Used to decide which feed actually led the move when a gap signal fires.
+    private (int midAChange, int midBChange) ComputeMidChange(long windowMs)
+    {
+        if (_samples.Count < 2)
+        {
+            return (0, 0);
+        }
+        var latest = _samples.Last();
+        var cutoff = latest.TimestampMs - windowMs;
+        GapSample? oldest = null;
+        foreach (var s in _samples)
+        {
+            if (s.TimestampMs >= cutoff)
+            {
+                oldest = s;
+                break;
+            }
+        }
+        if (oldest is null)
+        {
+            return (0, 0);
+        }
+        if (double.IsNaN(oldest.MidA) || double.IsNaN(latest.MidA)
+            || double.IsNaN(oldest.MidB) || double.IsNaN(latest.MidB))
+        {
+            return (0, 0);
+        }
+        var dA = (int)Math.Round((latest.MidA - oldest.MidA) * StrategyDefaults.PointMultiplier, MidpointRounding.AwayFromZero);
+        var dB = (int)Math.Round((latest.MidB - oldest.MidB) * StrategyDefaults.PointMultiplier, MidpointRounding.AwayFromZero);
+        return (dA, dB);
     }
 
     // Linear slope of GapBuy / GapSell over the last `windowMs` of samples, in
@@ -165,6 +203,6 @@ public sealed class RollingGapStats
         return Math.Sqrt(variance);
     }
 
-    private sealed record GapSample(long TimestampMs, int GapBuy, int GapSell, double SpreadB, double MidA);
+    private sealed record GapSample(long TimestampMs, int GapBuy, int GapSell, double SpreadB, double MidA, double MidB);
 }
 

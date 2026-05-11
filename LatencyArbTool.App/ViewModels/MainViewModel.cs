@@ -252,7 +252,13 @@ private string _chartHwndText = string.Empty;
         var feedBSeqDelta = _feedBSeq.ObserveDelta(tickB.Tick.Count);
         var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs, feedASilenceMs, feedBSilenceMs, feedASeqDelta, feedBSeqDelta);
 
-        _stats.Add(nowMs, gapBuy, gapSell, tickB.Tick.Spread, (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0);
+        _stats.Add(
+            nowMs,
+            gapBuy,
+            gapSell,
+            tickB.Tick.Spread,
+            midA: (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0,
+            midB: (tickB.Tick.Bid + tickB.Tick.Ask) / 2.0);
         var rawThresholds = _stats.GetThresholds();
 
         // Adaptive bias: shift OpenBuy / OpenSell deeper by the rolling-median
