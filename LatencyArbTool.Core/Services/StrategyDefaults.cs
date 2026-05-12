@@ -16,7 +16,10 @@ public static class StrategyDefaults
     public const int FixedOpenBuyFallback = -55;
     public const int FixedOpenSellFallback = 50;
 
-    public const int ConfirmMs = 200;
+    // Run 7 had 6000 qualifying-gap ticks over 3.8h but only 5 trades fired —
+    // signal was rare. Tightening confirm window 200→150ms lets signal lock in
+    // faster on short gap bursts without abandoning the confirm/recheck pattern.
+    public const int ConfirmMs = 150;
     public const int ReCheckMs = 100;
     public const double StabilityRatio = 0.4;
     public const int StackCooldownMs = 1000;
@@ -77,10 +80,18 @@ public static class StrategyDefaults
     // trailing mode — it holds until B retraces by TrailingDistanceUsd from the
     // peak (BUY) / trough (SELL). Lets winners run if A keeps moving.
     //
-    // Activation lowered $5 → $0.5 after run 5 showed max profit on the new
-    // (small-lot) broker was $4 — the old $5 gate meant trailing never engaged.
-    // Distance tightened $0.30 → $0.20 to give back less profit when B retraces.
-    public const double TrailingDistanceUsd = 0.20;
+    // Run 7 showed trailing still didn't engage even on $1.65 winners — broker
+    // POSITION_PROFIT reporting lags / under-reports on small lots. The fix is
+    // to engage trailing primarily on PRICE movement (data the bot already has
+    // tick-by-tick), with broker profit as a fallback trigger.
+    //
+    // Engagement: B price moved TrailingActivatePriceUsd favorably from open
+    // OR broker profit clears TrailingActivateProfitUsd.
+    // Close: B retraces TrailingDistanceUsd from peak (BUY) / trough (SELL).
+    // Distance tightened $0.20 → $0.10 so we don't give back more than we
+    // need to ride out short-lot noise.
+    public const double TrailingActivatePriceUsd = 0.10;
+    public const double TrailingDistanceUsd = 0.10;
     public const double TrailingActivateProfitUsd = 0.5;
 
     // Close-confirmation retry: run 5 trade 11 saw bot click close at t=3.5s
@@ -101,6 +112,10 @@ public static class StrategyDefaults
     //      AND in the direction that matches the trade thesis
     //      (positive for BUY = expect B to rise; negative for SELL = expect B to fall).
     //   2) |A move| must be at least LeadRatio × |B move| so A clearly led.
-    public const int MinLeadChangePts = 15;
-    public const double LeadRatio = 1.5;
+    // Run 7: lead-detection rejected ~99% of qualifying-gap ticks (only 5/6000
+    // fired). Loosened 15→10 (A move ≥ 10 pts is enough) and 1.5→1.3 (A only
+    // needs to dominate B by 30%). Should ~2x trade count while still filtering
+    // clear B-led gaps.
+    public const int MinLeadChangePts = 10;
+    public const double LeadRatio = 1.3;
 }

@@ -168,23 +168,40 @@ public sealed class DryRunClusterEngine
         string? reason = null;
         var closePrice = 0.0;
 
-        // Engage trailing as soon as broker reports profit ≥ activation threshold.
-        // No gap-revert requirement — the user's hint is "if price keeps moving
-        // favorably after entering, hold and let the trailing stop manage exit",
-        // so we activate trailing the moment we're in profit, regardless of gap.
-        if (!CurrentCluster.TrailingActive
-            && brokerProfitUsd.HasValue
-            && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
+        // Dual-trigger trailing engagement: either B has moved favorably from
+        // open by TrailingActivatePriceUsd (bot-computed, always available) OR
+        // the broker reports profit ≥ TrailingActivateProfitUsd (sometimes lags
+        // on small lots). Run 7 trade 2 hit $1.51 favorable move but trailing
+        // never engaged because the broker-profit-only check missed it — adding
+        // the price-based trigger fixes that.
+        if (!CurrentCluster.TrailingActive)
         {
-            CurrentCluster.TrailingActive = true;
-            events.Add(new DryRunEvent(
-                "trailing engaged",
-                $"profit ${brokerProfitUsd.Value:F2} ≥ ${StrategyDefaults.TrailingActivateProfitUsd:F2}",
-                State,
-                snapshot.NowMs,
-                CurrentCluster.ClusterId,
-                CurrentCluster.Side,
-                CurrentCluster.Orders.Count));
+            var openOrder = CurrentCluster.Orders.FirstOrDefault();
+            var priceTrigger = false;
+            if (openOrder is not null)
+            {
+                priceTrigger = CurrentCluster.Side == DryRunSide.BuyB
+                    ? snapshot.B.Bid >= openOrder.OpenPrice + StrategyDefaults.TrailingActivatePriceUsd
+                    : snapshot.B.Ask <= openOrder.OpenPrice - StrategyDefaults.TrailingActivatePriceUsd;
+            }
+            var profitTrigger = brokerProfitUsd.HasValue
+                && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd;
+
+            if (priceTrigger || profitTrigger)
+            {
+                CurrentCluster.TrailingActive = true;
+                var reasonStr = priceTrigger
+                    ? $"price moved ≥ ${StrategyDefaults.TrailingActivatePriceUsd:F2} favorably"
+                    : $"profit ${brokerProfitUsd!.Value:F2} ≥ ${StrategyDefaults.TrailingActivateProfitUsd:F2}";
+                events.Add(new DryRunEvent(
+                    "trailing engaged",
+                    reasonStr,
+                    State,
+                    snapshot.NowMs,
+                    CurrentCluster.ClusterId,
+                    CurrentCluster.Side,
+                    CurrentCluster.Orders.Count));
+            }
         }
 
         if (CurrentCluster.Side == DryRunSide.BuyB)
