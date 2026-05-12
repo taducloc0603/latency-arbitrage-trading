@@ -80,19 +80,19 @@ public static class StrategyDefaults
     // trailing mode — it holds until B retraces by TrailingDistanceUsd from the
     // peak (BUY) / trough (SELL). Lets winners run if A keeps moving.
     //
-    // Run 7 showed trailing still didn't engage even on $1.65 winners — broker
-    // POSITION_PROFIT reporting lags / under-reports on small lots. The fix is
-    // to engage trailing primarily on PRICE movement (data the bot already has
-    // tick-by-tick), with broker profit as a fallback trigger.
-    //
-    // Engagement: B price moved TrailingActivatePriceUsd favorably from open
-    // OR broker profit clears TrailingActivateProfitUsd.
-    // Close: B retraces TrailingDistanceUsd from peak (BUY) / trough (SELL).
-    // Distance tightened $0.20 → $0.10 so we don't give back more than we
-    // need to ride out short-lot noise.
+    // Run 8 trade 4 captured only 54% of a $1.27 favorable move because
+    // TrailingDistanceUsd=$0.10 was too tight. Widened to $0.20 so big winners
+    // run further before fixed-distance trigger fires. Combined with two new
+    // safety layers below to keep losses controlled.
     public const double TrailingActivatePriceUsd = 0.10;
-    public const double TrailingDistanceUsd = 0.10;
+    public const double TrailingDistanceUsd = 0.20;
     public const double TrailingActivateProfitUsd = 0.5;
+
+    // BREAK-EVEN FLOOR: once trailing has engaged (we're in profit), never
+    // allow the trade to close at a loss. If bot's raw P&L ever drops to 0
+    // (or below), close immediately at break-even. Implements user requirement
+    // "no losses or controlled losses".
+    public const double TrailingBreakEvenFloorRaw = 0.0;
 
     // Close-confirmation retry: run 5 trade 11 saw bot click close at t=3.5s
     // but broker only processed it at t=89s, costing $17.79 (62% of total loss).

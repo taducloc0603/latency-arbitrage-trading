@@ -36,6 +36,10 @@ public sealed class DryRunCluster
     public double TroughAskB { get; set; }
     public bool TrailingActive { get; set; }
     public double FloatingPnlRaw { get; set; }
+    // Highest FloatingPnlRaw observed since open. Used by the trailing engine
+    // to enforce break-even floor and profit-ratio drawdown — both prevent
+    // giving back too much of a peak after the trade has been in profit.
+    public double PeakFloatingPnlRaw { get; set; }
     public double RealizedPnlRaw { get; set; }
     public string CloseReason { get; set; } = string.Empty;
     public List<DryRunOrder> Orders { get; } = [];

@@ -204,52 +204,54 @@ public sealed class DryRunClusterEngine
             }
         }
 
-        if (CurrentCluster.Side == DryRunSide.BuyB)
+        // Trailing-active close (2-layer): break-even floor first to enforce
+        // "no losses after engagement", then B price retrace as the trigger
+        // for normal trailing exit.
+        if (CurrentCluster.TrailingActive)
+        {
+            closePrice = CurrentCluster.Side == DryRunSide.BuyB ? snapshot.B.Bid : snapshot.B.Ask;
+
+            // 1. Break-even floor: once we've been in profit, never close at a
+            // loss. Run 5 trade 11 and run 7 trade 1 each gave back early
+            // profit to end negative — this prevents that.
+            if (CurrentCluster.FloatingPnlRaw <= StrategyDefaults.TrailingBreakEvenFloorRaw)
+            {
+                reason = "trailing break-even floor";
+            }
+            // 2. B price retrace.
+            else if (CurrentCluster.Side == DryRunSide.BuyB
+                     && snapshot.B.Bid <= CurrentCluster.PeakBidB - StrategyDefaults.TrailingDistanceUsd)
+            {
+                reason = "buy trailing stop hit";
+            }
+            else if (CurrentCluster.Side == DryRunSide.SellB
+                     && snapshot.B.Ask >= CurrentCluster.TroughAskB + StrategyDefaults.TrailingDistanceUsd)
+            {
+                reason = "sell trailing stop hit";
+            }
+        }
+        else if (CurrentCluster.Side == DryRunSide.BuyB)
         {
             closePrice = snapshot.B.Bid;
-
-            if (CurrentCluster.TrailingActive)
+            if (snapshot.A.Ask <= CurrentCluster.PeakAskA - StrategyDefaults.AReversalUsd)
             {
-                // Trailing-active mode: only B retrace can close. A-reversal and
-                // gap-revert are suppressed so a continuing favorable move runs.
-                if (snapshot.B.Bid <= CurrentCluster.PeakBidB - StrategyDefaults.TrailingDistanceUsd)
-                {
-                    reason = "buy trailing stop hit";
-                }
+                reason = "A ask reversal";
             }
-            else
+            else if (snapshot.GapBuy >= thresholds.CloseBuyRevert)
             {
-                if (snapshot.A.Ask <= CurrentCluster.PeakAskA - StrategyDefaults.AReversalUsd)
-                {
-                    reason = "A ask reversal";
-                }
-                else if (snapshot.GapBuy >= thresholds.CloseBuyRevert)
-                {
-                    reason = "buy gap reverted";
-                }
+                reason = "buy gap reverted";
             }
         }
         else
         {
             closePrice = snapshot.B.Ask;
-
-            if (CurrentCluster.TrailingActive)
+            if (snapshot.A.Bid >= CurrentCluster.TroughBidA + StrategyDefaults.AReversalUsd)
             {
-                if (snapshot.B.Ask >= CurrentCluster.TroughAskB + StrategyDefaults.TrailingDistanceUsd)
-                {
-                    reason = "sell trailing stop hit";
-                }
+                reason = "A bid reversal";
             }
-            else
+            else if (snapshot.GapSell <= thresholds.CloseSellRevert)
             {
-                if (snapshot.A.Bid >= CurrentCluster.TroughBidA + StrategyDefaults.AReversalUsd)
-                {
-                    reason = "A bid reversal";
-                }
-                else if (snapshot.GapSell <= thresholds.CloseSellRevert)
-                {
-                    reason = "sell gap reverted";
-                }
+                reason = "sell gap reverted";
             }
         }
 
@@ -425,6 +427,10 @@ public sealed class DryRunClusterEngine
 
         var closePrice = CurrentCluster.Side == DryRunSide.BuyB ? snapshot.B.Bid : snapshot.B.Ask;
         CurrentCluster.FloatingPnlRaw = CurrentCluster.Orders.Sum(order => Pnl(order, closePrice));
+        if (CurrentCluster.FloatingPnlRaw > CurrentCluster.PeakFloatingPnlRaw)
+        {
+            CurrentCluster.PeakFloatingPnlRaw = CurrentCluster.FloatingPnlRaw;
+        }
     }
 
     private static double Pnl(DryRunOrder order, double closePrice)

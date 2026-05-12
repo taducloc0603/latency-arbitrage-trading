@@ -225,6 +225,31 @@ public sealed class DryRunClusterEngineTests
     }
 
     [Fact]
+    public void Step_TrailingClosesAtBreakEvenFloorAfterEngagement()
+    {
+        var engine = new DryRunClusterEngine();
+        engine.Step(Snapshot(0, gapBuy: -80, gapSell: 0, bidB: 100, askB: 101), Thresholds(), SignalSide.BuyB);
+
+        // Engage trailing (broker profit clears activation).
+        engine.Step(
+            Snapshot(StrategyDefaults.MinHoldMs, gapBuy: -10, gapSell: 0, bidB: 102, askB: 103),
+            Thresholds(),
+            null,
+            brokerProfitUsd: 10.0);
+
+        // Price drops back so FloatingPnlRaw ≤ 0 — break-even floor must close.
+        var bidAtBreakEven = 101.0; // back at open price for BUY (openPrice = askB at decide = 101)
+        var events = engine.Step(
+            Snapshot(StrategyDefaults.MinHoldMs + 200, gapBuy: 0, gapSell: 0, bidB: bidAtBreakEven, askB: bidAtBreakEven + 1),
+            Thresholds(),
+            null,
+            brokerProfitUsd: 0.0);
+
+        Assert.Null(engine.CurrentCluster);
+        Assert.Contains(events, e => e.Decision == "live close" && e.Reason == "trailing break-even floor");
+    }
+
+    [Fact]
     public void Step_TrailingDoesNotEngageWithoutProfit()
     {
         var engine = new DryRunClusterEngine();
