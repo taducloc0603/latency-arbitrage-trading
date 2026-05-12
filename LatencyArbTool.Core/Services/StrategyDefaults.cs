@@ -101,8 +101,12 @@ public static class StrategyDefaults
     // up to CloseRetryMax times. ClosePositionMt5(row=0) is idempotent and
     // ValidateBTradeState rejects retries once the position is gone, so this
     // is safe even if the original click eventually goes through.
+    // Run 8 trade 2: bot decided close at t=6.6s, broker only processed it at
+    // t=113s. Retry was 5×1.5s=7.5s — gave up at 7.5s and trade just happened
+    // to close favorably by luck. Bumped to 30×1.5s=45s so we keep banging on
+    // close clicks instead of waiting on broker whim.
     public const int CloseRetryThresholdMs = 1500;
-    public const int CloseRetryMax = 5;
+    public const int CloseRetryMax = 30;
 
     // Lead detection: the strategy's edge requires A to lead the move that
     // produced the gap. When B leads instead (e.g. broker B quote jumps before
@@ -112,10 +116,10 @@ public static class StrategyDefaults
     //      AND in the direction that matches the trade thesis
     //      (positive for BUY = expect B to rise; negative for SELL = expect B to fall).
     //   2) |A move| must be at least LeadRatio × |B move| so A clearly led.
-    // Run 7: lead-detection rejected ~99% of qualifying-gap ticks (only 5/6000
-    // fired). Loosened 15→10 (A move ≥ 10 pts is enough) and 1.5→1.3 (A only
-    // needs to dominate B by 30%). Should ~2x trade count while still filtering
-    // clear B-led gaps.
-    public const int MinLeadChangePts = 10;
-    public const double LeadRatio = 1.3;
+    // Run 8+9 confirmed trailing works (4/5 engagement, PnL flipped to +$0.25)
+    // and trade rate doubled from 1.3 to 2.4 /hr. Push lead detection one more
+    // notch: A move ≥ 8 pts is enough, dominate B by 20%. Should push trade
+    // rate to ~3-4/hr while still filtering obvious B-led gaps.
+    public const int MinLeadChangePts = 8;
+    public const double LeadRatio = 1.2;
 }
