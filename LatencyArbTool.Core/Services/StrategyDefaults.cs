@@ -80,13 +80,18 @@ public static class StrategyDefaults
     // trailing mode — it holds until B retraces by TrailingDistanceUsd from the
     // peak (BUY) / trough (SELL). Lets winners run if A keeps moving.
     //
-    // Run 8 trade 4 captured only 54% of a $1.27 favorable move because
-    // TrailingDistanceUsd=$0.10 was too tight. Widened to $0.20 so big winners
-    // run further before fixed-distance trigger fires. Combined with two new
-    // safety layers below to keep losses controlled.
-    public const double TrailingActivatePriceUsd = 0.10;
+    // Run 11 showed price-based engagement (TrailingActivatePriceUsd) fired
+    // on PHANTOM profit when bot's decide-time openPrice differed from broker's
+    // actual fill price due to slippage. Bot saw +$1.25 raw on trade 2 BUY
+    // but broker reality was -$0.08. Trailing engaged falsely, then "break-even
+    // floor" closed at bot-view zero while broker booked $-0.84 loss.
+    //
+    // Fix: engagement now requires BROKER-reported profit only. If the broker
+    // map doesn't confirm the trade is in profit, trailing stays off and the
+    // standard close logic (gap revert, A reversal, loss cap) handles exit.
+    // Lowered $0.50 → $0.30 so genuine small-lot winners still engage.
     public const double TrailingDistanceUsd = 0.20;
-    public const double TrailingActivateProfitUsd = 0.5;
+    public const double TrailingActivateProfitUsd = 0.30;
 
     // BREAK-EVEN FLOOR: once trailing has engaged (we're in profit), never
     // allow the trade to close at a loss. If bot's raw P&L ever drops to 0

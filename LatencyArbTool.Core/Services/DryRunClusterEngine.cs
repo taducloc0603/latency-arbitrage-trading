@@ -168,40 +168,24 @@ public sealed class DryRunClusterEngine
         string? reason = null;
         var closePrice = 0.0;
 
-        // Dual-trigger trailing engagement: either B has moved favorably from
-        // open by TrailingActivatePriceUsd (bot-computed, always available) OR
-        // the broker reports profit ≥ TrailingActivateProfitUsd (sometimes lags
-        // on small lots). Run 7 trade 2 hit $1.51 favorable move but trailing
-        // never engaged because the broker-profit-only check missed it — adding
-        // the price-based trigger fixes that.
-        if (!CurrentCluster.TrailingActive)
+        // Broker-profit-only trailing engagement: avoids the run-11 phantom-
+        // profit false engage where bot's decide-time openPrice diverged from
+        // the broker fill by ~$0.30 of slippage. If the broker doesn't confirm
+        // the trade is genuinely profitable, we don't engage trailing — let
+        // standard exit logic handle the trade. Conservative by design.
+        if (!CurrentCluster.TrailingActive
+            && brokerProfitUsd.HasValue
+            && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd)
         {
-            var openOrder = CurrentCluster.Orders.FirstOrDefault();
-            var priceTrigger = false;
-            if (openOrder is not null)
-            {
-                priceTrigger = CurrentCluster.Side == DryRunSide.BuyB
-                    ? snapshot.B.Bid >= openOrder.OpenPrice + StrategyDefaults.TrailingActivatePriceUsd
-                    : snapshot.B.Ask <= openOrder.OpenPrice - StrategyDefaults.TrailingActivatePriceUsd;
-            }
-            var profitTrigger = brokerProfitUsd.HasValue
-                && brokerProfitUsd.Value >= StrategyDefaults.TrailingActivateProfitUsd;
-
-            if (priceTrigger || profitTrigger)
-            {
-                CurrentCluster.TrailingActive = true;
-                var reasonStr = priceTrigger
-                    ? $"price moved ≥ ${StrategyDefaults.TrailingActivatePriceUsd:F2} favorably"
-                    : $"profit ${brokerProfitUsd!.Value:F2} ≥ ${StrategyDefaults.TrailingActivateProfitUsd:F2}";
-                events.Add(new DryRunEvent(
-                    "trailing engaged",
-                    reasonStr,
-                    State,
-                    snapshot.NowMs,
-                    CurrentCluster.ClusterId,
-                    CurrentCluster.Side,
-                    CurrentCluster.Orders.Count));
-            }
+            CurrentCluster.TrailingActive = true;
+            events.Add(new DryRunEvent(
+                "trailing engaged",
+                $"broker profit ${brokerProfitUsd.Value:F2} ≥ ${StrategyDefaults.TrailingActivateProfitUsd:F2}",
+                State,
+                snapshot.NowMs,
+                CurrentCluster.ClusterId,
+                CurrentCluster.Side,
+                CurrentCluster.Orders.Count));
         }
 
         // Trailing-active close (2-layer): break-even floor first to enforce
@@ -212,9 +196,13 @@ public sealed class DryRunClusterEngine
             closePrice = CurrentCluster.Side == DryRunSide.BuyB ? snapshot.B.Bid : snapshot.B.Ask;
 
             // 1. Break-even floor: once we've been in profit, never close at a
-            // loss. Run 5 trade 11 and run 7 trade 1 each gave back early
-            // profit to end negative — this prevents that.
-            if (CurrentCluster.FloatingPnlRaw <= StrategyDefaults.TrailingBreakEvenFloorRaw)
+            // loss. Uses broker profit when available (most accurate), with
+            // raw P&L as fallback. Run 11 trade 2 closed at bot-view zero but
+            // broker booked $-0.84 — checking broker profit prevents that.
+            var atOrBelowBreakEven = brokerProfitUsd.HasValue
+                ? brokerProfitUsd.Value <= StrategyDefaults.TrailingBreakEvenFloorRaw
+                : CurrentCluster.FloatingPnlRaw <= StrategyDefaults.TrailingBreakEvenFloorRaw;
+            if (atOrBelowBreakEven)
             {
                 reason = "trailing break-even floor";
             }
