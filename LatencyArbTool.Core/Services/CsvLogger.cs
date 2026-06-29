@@ -24,18 +24,18 @@ public sealed class CsvLogger : IDisposable
 
         _events.WriteLine("timestamp,clusterId,decision,reason,side,entryPoint,openPrice,closePrice,pnlPoints,gapAtOpen,holdMs,trailingActive,windowN,windowMin,windowMax,windowFirst,windowLast,windowAvg,windowDurMs,windowGaps");
         _fills.WriteLine("kind,ticket,clusterId,side,decideTimeMs,fillTimeMs,latencyMs,decideGap,fillObservedGap,decidePrice,fillPrice,slippagePrice,realizedUsd,commission");
-        _snapshot.WriteLine("timestamp,aBid,aAsk,bBid,bAsk,spreadA,spreadB,netGapBuy,netGapSell,winState,winDurMs,winMin,winMax,winN");
+        _snapshot.WriteLine("timestamp,aBid,aAsk,bBid,bAsk,spreadA,spreadB,gapBuy,gapSell,winState,winDurMs,winMin,winMax,winN");
     }
 
-    // Periodic (~1s) market + net-gap + signal-window snapshot for analysis.
-    public void LogSnapshot(long ts, TickRecord a, TickRecord b, int netGapBuy, int netGapSell,
+    // Periodic (~1s) market + gap + signal-window snapshot for analysis.
+    public void LogSnapshot(long ts, TickRecord a, TickRecord b, int gapBuy, int gapSell,
         string winState, long winDurMs, int winMin, int winMax, int winN)
     {
         _snapshot.WriteLine(string.Join(',',
             ts,
             F(a.Bid), F(a.Ask), F(b.Bid), F(b.Ask),
             F(a.Spread), F(b.Spread),
-            netGapBuy, netGapSell,
+            gapBuy, gapSell,
             winState, winDurMs, winMin, winMax, winN));
     }
 

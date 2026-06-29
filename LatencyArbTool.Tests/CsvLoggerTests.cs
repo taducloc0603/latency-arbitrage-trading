@@ -62,13 +62,13 @@ public sealed class CsvLoggerTests
             var b = new TickRecord(1, 850, 4050.40, 4050.69, 0.29, 1, "XAUUSD");
             using (var logger = new CsvLogger(logsDir))
             {
-                logger.LogSnapshot(1234, a, b, netGapBuy: -22, netGapSell: 22,
+                logger.LogSnapshot(1234, a, b, gapBuy: -22, gapSell: 22,
                     winState: "idle", winDurMs: 0, winMin: 0, winMax: 0, winN: 0);
             }
 
             var snap = Directory.GetFiles(logsDir, "snapshot_*.csv").Single();
             var lines = File.ReadAllLines(snap);
-            Assert.Equal("timestamp,aBid,aAsk,bBid,bAsk,spreadA,spreadB,netGapBuy,netGapSell,winState,winDurMs,winMin,winMax,winN", lines[0]);
+            Assert.Equal("timestamp,aBid,aAsk,bBid,bAsk,spreadA,spreadB,gapBuy,gapSell,winState,winDurMs,winMin,winMax,winN", lines[0]);
             Assert.Contains("1234,", lines[1]);
             Assert.Contains("-22,22,idle", lines[1]);
         });

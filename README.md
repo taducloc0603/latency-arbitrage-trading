@@ -6,23 +6,20 @@ Dong lenh bang Stop-Loss, chuyen sang Trailing-Stop khi da co lai du nguong.
 
 ---
 
-## 1. Cong thuc GAP (lech mid tru spread B; don vi point; `point` tu config, vd 100)
-
-Lenh chi mo o B (mot chan): BUY mua B.Ask roi chot B.Bid -> di 1 vong mat tron spread B.
-Loi that khi B catch-up A (mid B -> mid A) = `(midA - midB) - spreadB`. Vi vay gap = lech
-mid da tru spread B; `x` = **loi nhuan that toi thieu sau khi tra spread B**:
+## 1. Cong thuc GAP (same-side A - B; don vi point; `point` tu config, vd 100)
 
 ```
-midA = (A.Bid + A.Ask) / 2 ; midB = (B.Bid + B.Ask) / 2 ; spreadB = B.Ask - B.Bid
-D = midA - midB
-GapBuy  = (D - spreadB) * point   -> BUY  khi GapBuy  >= x
-GapSell = (D + spreadB) * point   -> SELL khi GapSell <= -x   (<=> (midB - midA) - spreadB >= x)
+GapBuy  = (int)(A.Bid * point) - (int)(B.Bid * point)
+GapSell = (int)(A.Ask * point) - (int)(B.Ask * point)
 ```
 
-Luu y: luc mid A ~ mid B (khong lech that), `GapBuy ~ -spreadB`, `GapSell ~ +spreadB`
--> ca hai phia deu xa nguong -> KHONG ban tren nhieu spread. Tin hieu chi ban khi A lech
-that so voi B du de con lai >= x sau khi tru spread B. Label UI `GapBuy/GapSell` va cot log
-`gapAtOpen`/`netGap*` mang nghia "edge sau spread".
+- A cao hon B -> `GapBuy > 0`  -> BUY B.
+- A thap hon B -> `GapSell < 0` -> SELL B.
+- OpenSignalEngine: BUY khi `GapBuy >= x` ; SELL khi `GapSell <= -x`.
+
+Vi du (`point=1`): A=4200, B=4100 -> GapBuy=+100 -> BUY B ; A=4100, B=4200 -> GapSell=-100 -> SELL B.
+
+Luu y: gap nay KHONG tru spread (gom ca chenh spread giua A va B).
 
 Code: [GapCalculator.cs](LatencyArbTool.Core/Services/GapCalculator.cs).
 
