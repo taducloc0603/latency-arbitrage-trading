@@ -17,10 +17,12 @@ public sealed class CsvLogger : IDisposable
 
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         _events = Create(Path.Combine(logsDirectory, $"events_{stamp}.csv"));
-        _events.WriteLine("timestamp,clusterId,decision,reason,side,openPrice,closePrice,pnlPoints,holdMs,trailingActive");
+        _events.WriteLine("timestamp,clusterId,decision,reason,side,entryPoint,openPrice,closePrice,pnlPoints,gapAtOpen,holdMs,trailingActive");
     }
 
-    public void LogEvent(DryRunEvent e)
+    // gapAtOpen / entryPoint describe the position context (for a close row they are
+    // the values captured when it was opened).
+    public void LogEvent(DryRunEvent e, int gapAtOpen, int entryPoint)
     {
         _events.WriteLine(string.Join(',',
             e.TimestampMs,
@@ -28,9 +30,11 @@ public sealed class CsvLogger : IDisposable
             Escape(e.Decision),
             Escape(e.Reason),
             e.Side?.ToString() ?? string.Empty,
+            entryPoint,
             F(e.OpenPrice),
             F(e.ClosePrice),
             F(e.PnlRaw),
+            gapAtOpen,
             e.HoldMs,
             e.TrailingActive));
     }

@@ -48,6 +48,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _trailingState = "-";
     private string _liveStatus = "Idle";
 
+    // Captured at open so the matching close row can log the position's entry context.
+    private int? _openGapAtOpen;
+    private int? _openEntryPoint;
+
     public MainViewModel()
     {
         _tradeExecutor = new Mt5TradeExecutor(_mt5Engine);
@@ -211,8 +215,30 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         foreach (var e in events)
         {
-            AddLog($"{e.Decision}: {e.Reason}");
-            _csvLogger?.LogEvent(e);
+            int gapAtOpen;
+            int entryPoint;
+            if (e.Decision == "live open")
+            {
+                gapAtOpen = e.Side == DryRunSide.BuyB ? gapBuy : gapSell;
+                entryPoint = GapCalculator.ToPoints(e.OpenPrice, config.Point);
+                _openGapAtOpen = gapAtOpen;
+                _openEntryPoint = entryPoint;
+            }
+            else if (e.Decision == "live close")
+            {
+                gapAtOpen = _openGapAtOpen ?? 0;
+                entryPoint = _openEntryPoint ?? 0;
+                _openGapAtOpen = null;
+                _openEntryPoint = null;
+            }
+            else
+            {
+                gapAtOpen = 0;
+                entryPoint = 0;
+            }
+
+            AddLog(DescribeEvent(e, gapBuy, gapSell));
+            _csvLogger?.LogEvent(e, gapAtOpen, entryPoint);
             ExecuteLive(e, bTrades);
 
             // A fresh open consumes the signal: reset so re-entry requires a new
@@ -222,6 +248,21 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _signalEngine.Reset();
             }
         }
+    }
+
+    private static string DescribeEvent(DryRunEvent e, int gapBuy, int gapSell)
+    {
+        var side = e.Side?.ToString() ?? string.Empty;
+        return e.Decision switch
+        {
+            "live open" =>
+                $"live open {side} entry={F(e.OpenPrice)} gap={(e.Side == DryRunSide.BuyB ? gapBuy : gapSell)}",
+            "live close" =>
+                $"live close {side} {e.Reason} exit={F(e.ClosePrice)} " +
+                $"pnl={((int)e.PnlRaw).ToString("+0;-0;0", CultureInfo.InvariantCulture)}pt " +
+                $"hold={e.HoldMs / 1000.0:0.0}s",
+            _ => $"{e.Decision}: {e.Reason}",
+        };
     }
 
     private void ExecuteLive(DryRunEvent e, TradeReadResult bTrades)

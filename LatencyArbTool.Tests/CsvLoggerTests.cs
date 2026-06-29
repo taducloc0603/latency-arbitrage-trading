@@ -14,14 +14,17 @@ public sealed class CsvLoggerTests
             {
                 logger.LogEvent(new DryRunEvent(
                     "live close", "stop loss", BotState.Idle, 1, ClusterId: 7,
-                    Side: DryRunSide.BuyB, ClosePrice: 99.5, PnlRaw: -50));
+                    Side: DryRunSide.BuyB, ClosePrice: 99.5, PnlRaw: -50),
+                    gapAtOpen: 120, entryPoint: 200010);
             } // dispose closes the writer before we read the file (Windows file lock)
 
             var events = Directory.GetFiles(logsDir, "events_*.csv").Single();
             var lines = File.ReadAllLines(events);
-            Assert.Equal("timestamp,clusterId,decision,reason,side,openPrice,closePrice,pnlPoints,holdMs,trailingActive", lines[0]);
+            Assert.Equal("timestamp,clusterId,decision,reason,side,entryPoint,openPrice,closePrice,pnlPoints,gapAtOpen,holdMs,trailingActive", lines[0]);
             Assert.Contains("stop loss", lines[1]);
             Assert.Contains("BuyB", lines[1]);
+            Assert.Contains("200010", lines[1]);
+            Assert.Contains("120", lines[1]);
         });
     }
 
