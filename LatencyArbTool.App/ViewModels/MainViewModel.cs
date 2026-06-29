@@ -15,10 +15,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private readonly SharedMemoryTickReader _reader = new();
     private readonly SharedMemoryTradeReader _tradeReader = new();
+    private readonly SharedMemoryHistoryReader _historyReader = new();
     private readonly Mt5Engine _mt5Engine = new();
     private readonly Mt5TradeExecutor _tradeExecutor;
     private readonly OpenSignalEngine _signalEngine = new();
     private readonly TrailingStopEngine _trailingEngine = new();
+    private readonly FillTracker _fillTracker = new();
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
 
@@ -169,6 +171,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _csvLogger = new CsvLogger(logsDirectory);
 
         _signalEngine.Reset();
+        _fillTracker.Reset();
         IsRunning = true;
         _timer.Start();
         AddLog($"start; logs at {logsDirectory}");
@@ -195,6 +198,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         StatusB = tickB.Success ? "Connected" : $"Disconnected: {tickB.Error}";
 
         var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
+        var bHistory = _historyReader.TryReadForTickMap(MapNameB);
         StatusBTrade = bTrades.Success ? $"Connected: {bTrades.Count} open" : $"Disconnected: {bTrades.Error}";
 
         if (tickA.Tick is null || tickB.Tick is null)
@@ -217,10 +221,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             int gapAtOpen;
             int entryPoint;
+            SignalWindow? window = null;
             if (e.Decision == "live open")
             {
                 gapAtOpen = e.Side == DryRunSide.BuyB ? gapBuy : gapSell;
                 entryPoint = GapCalculator.ToPoints(e.OpenPrice, config.Point);
+                window = _signalEngine.LastWindow;
                 _openGapAtOpen = gapAtOpen;
                 _openEntryPoint = entryPoint;
             }
@@ -237,9 +243,23 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 entryPoint = 0;
             }
 
-            AddLog(DescribeEvent(e, gapBuy, gapSell));
-            _csvLogger?.LogEvent(e, gapAtOpen, entryPoint);
-            ExecuteLive(e, bTrades);
+            AddLog(DescribeEvent(e, gapBuy, gapSell, window));
+            _csvLogger?.LogEvent(e, gapAtOpen, entryPoint, window);
+
+            var result = ExecuteLive(e, bTrades);
+            if (result.Success)
+            {
+                var side = e.Side ?? DryRunSide.BuyB;
+                if (e.Decision == "live open")
+                {
+                    _fillTracker.RecordOpenClick(new ClickContext(nowMs, gapAtOpen, e.OpenPrice, side, e.ClusterId, "live open"));
+                }
+                else if (e.Decision == "live close" && bTrades.Success && bTrades.Trades.Count > 0)
+                {
+                    _fillTracker.RecordCloseClick(bTrades.Trades[0].Ticket,
+                        new ClickContext(nowMs, gapAtOpen, e.ClosePrice, side, e.ClusterId, "live close"));
+                }
+            }
 
             // A fresh open consumes the signal: reset so re-entry requires a new
             // confirm window rather than firing every tick the gap stays extreme.
@@ -248,34 +268,71 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _signalEngine.Reset();
             }
         }
+
+        // Observe broker fills every tick (slippage arrives a few ticks after the
+        // click) — log/recheck only, never feeds the strategy.
+        foreach (var fill in _fillTracker.Observe(bTrades, bHistory, gapBuy, gapSell))
+        {
+            AddLog(DescribeFill(fill, config.Point));
+            _csvLogger?.LogFill(fill);
+        }
     }
 
-    private static string DescribeEvent(DryRunEvent e, int gapBuy, int gapSell)
+    private static string DescribeEvent(DryRunEvent e, int gapBuy, int gapSell, SignalWindow? window)
     {
         var side = e.Side?.ToString() ?? string.Empty;
         return e.Decision switch
         {
             "live open" =>
-                $"live open {side} entry={F(e.OpenPrice)} gap={(e.Side == DryRunSide.BuyB ? gapBuy : gapSell)}",
+                $"live open {side} entry={F(e.OpenPrice)} gap={(e.Side == DryRunSide.BuyB ? gapBuy : gapSell)}{DescribeWindow(window)}",
             "live close" =>
                 $"live close {side} {e.Reason} exit={F(e.ClosePrice)} " +
-                $"pnl={((int)e.PnlRaw).ToString("+0;-0;0", CultureInfo.InvariantCulture)}pt " +
+                $"pnl={Signed((int)e.PnlRaw)}pt " +
                 $"hold={e.HoldMs / 1000.0:0.0}s",
             _ => $"{e.Decision}: {e.Reason}",
         };
     }
 
-    private void ExecuteLive(DryRunEvent e, TradeReadResult bTrades)
+    private static string DescribeWindow(SignalWindow? w)
     {
-        var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades);
-        if (!result.Attempted)
+        if (w is null || w.Count == 0)
         {
-            return;
+            return string.Empty;
         }
 
-        var prefix = result.Success ? "live ok" : "live failed";
-        LiveStatus = $"{prefix}: {result.Message}";
-        AddLog($"{prefix}: {result.Message}");
+        return $" win[n={w.Count} min={w.Min} max={w.Max} first={w.First} last={w.Last} " +
+               $"avg={w.Avg.ToString("0", CultureInfo.InvariantCulture)} z={w.Z} x={w.X} dur={w.DurationMs}ms]";
+    }
+
+    private static string DescribeFill(FillEvent f, int point)
+    {
+        var slipPt = GapCalculator.ToPoints(f.SlippagePrice, point);
+        if (f.IsClose)
+        {
+            return $"fill close #{f.Ticket} closePrice={F(f.FillPrice)} " +
+                   $"realizedUsd={f.RealizedUsd.ToString("0.##", CultureInfo.InvariantCulture)} " +
+                   $"comm={f.Commission.ToString("0.##", CultureInfo.InvariantCulture)} " +
+                   $"slip={Signed(slipPt)}pt latency={f.SlippageMs}ms";
+        }
+
+        var gapDrift = f.DecideGap - f.FillObservedGap;
+        return $"fill open #{f.Ticket} fillPrice={F(f.FillPrice)} " +
+               $"slip={Signed(slipPt)}pt gapDrift={Signed(gapDrift)} latency={f.SlippageMs}ms";
+    }
+
+    private static string Signed(int value) => value.ToString("+0;-0;0", CultureInfo.InvariantCulture);
+
+    private LiveTradeResult ExecuteLive(DryRunEvent e, TradeReadResult bTrades)
+    {
+        var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades);
+        if (result.Attempted)
+        {
+            var prefix = result.Success ? "live ok" : "live failed";
+            LiveStatus = $"{prefix}: {result.Message}";
+            AddLog($"{prefix}: {result.Message}");
+        }
+
+        return result;
     }
 
     private void UpdateMarketUi(TickRecord a, TickRecord b, int gapBuy, int gapSell, StrategyConfig config)

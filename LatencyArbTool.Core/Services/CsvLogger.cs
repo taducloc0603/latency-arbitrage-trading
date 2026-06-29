@@ -5,11 +5,12 @@ using LatencyArbTool.Core.Models;
 
 namespace LatencyArbTool.Core.Services;
 
-// Logs only meaningful events (open / close). Per-tick logging was dropped — it
-// produced ~40 rows/sec with no consumer after the stats/simulation code was removed.
+// Logs open/close decisions (events_*.csv) and broker fill confirmations with
+// slippage (fills_*.csv). Per-tick logging was dropped — no consumer.
 public sealed class CsvLogger : IDisposable
 {
     private readonly StreamWriter _events;
+    private readonly StreamWriter _fills;
 
     public CsvLogger(string logsDirectory)
     {
@@ -17,12 +18,14 @@ public sealed class CsvLogger : IDisposable
 
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         _events = Create(Path.Combine(logsDirectory, $"events_{stamp}.csv"));
-        _events.WriteLine("timestamp,clusterId,decision,reason,side,entryPoint,openPrice,closePrice,pnlPoints,gapAtOpen,holdMs,trailingActive");
+        _fills = Create(Path.Combine(logsDirectory, $"fills_{stamp}.csv"));
+
+        _events.WriteLine("timestamp,clusterId,decision,reason,side,entryPoint,openPrice,closePrice,pnlPoints,gapAtOpen,holdMs,trailingActive,windowN,windowMin,windowMax,windowFirst,windowLast,windowAvg,windowDurMs,windowGaps");
+        _fills.WriteLine("kind,ticket,clusterId,side,decideTimeMs,fillTimeMs,latencyMs,decideGap,fillObservedGap,decidePrice,fillPrice,slippagePrice,realizedUsd,commission");
     }
 
-    // gapAtOpen / entryPoint describe the position context (for a close row they are
-    // the values captured when it was opened).
-    public void LogEvent(DryRunEvent e, int gapAtOpen, int entryPoint)
+    // window is populated only for "live open" rows (the confirm-window snapshot).
+    public void LogEvent(DryRunEvent e, int gapAtOpen, int entryPoint, SignalWindow? window = null)
     {
         _events.WriteLine(string.Join(',',
             e.TimestampMs,
@@ -36,12 +39,47 @@ public sealed class CsvLogger : IDisposable
             F(e.PnlRaw),
             gapAtOpen,
             e.HoldMs,
-            e.TrailingActive));
+            e.TrailingActive,
+            window?.Count.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            window is null ? string.Empty : window.Min.ToString(CultureInfo.InvariantCulture),
+            window is null ? string.Empty : window.Max.ToString(CultureInfo.InvariantCulture),
+            window is null ? string.Empty : window.First.ToString(CultureInfo.InvariantCulture),
+            window is null ? string.Empty : window.Last.ToString(CultureInfo.InvariantCulture),
+            window is null ? string.Empty : F(window.Avg),
+            window?.DurationMs.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            window is null ? string.Empty : Escape(string.Join(';', window.Gaps))));
     }
 
-    public void Flush() => _events.Flush();
+    public void LogFill(FillEvent f)
+    {
+        _fills.WriteLine(string.Join(',',
+            f.IsClose ? "close" : "open",
+            f.Ticket,
+            f.ClusterId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            f.Side,
+            f.DecideTimeMs,
+            f.FillTimeMs,
+            f.SlippageMs,
+            f.DecideGap,
+            f.FillObservedGap,
+            F(f.DecidePrice),
+            F(f.FillPrice),
+            F(f.SlippagePrice),
+            F(f.RealizedUsd),
+            F(f.Commission)));
+    }
 
-    public void Dispose() => _events.Dispose();
+    public void Flush()
+    {
+        _events.Flush();
+        _fills.Flush();
+    }
+
+    public void Dispose()
+    {
+        _events.Dispose();
+        _fills.Dispose();
+    }
 
     private static StreamWriter Create(string path)
     {

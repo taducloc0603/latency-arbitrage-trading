@@ -62,6 +62,31 @@ public sealed class OpenSignalEngineTests
     }
 
     [Fact]
+    public void LastWindow_CapturedWhenSignalFires()
+    {
+        var e = new OpenSignalEngine();
+        var c = Cfg(); // x=100, y=1000, z=50
+
+        e.Evaluate(120, 0, 0, c);
+        e.Evaluate(150, 0, 200, c);
+        e.Evaluate(95, 0, 500, c);
+        var s = e.Evaluate(130, 0, 1000, c);
+
+        Assert.Equal(SignalSide.BuyB, s);
+        var w = e.LastWindow!;
+        Assert.NotNull(w);
+        Assert.Equal(4, w.Count);
+        Assert.Equal(95, w.Min);
+        Assert.Equal(150, w.Max);
+        Assert.Equal(120, w.First);
+        Assert.Equal(130, w.Last);
+        Assert.Equal(1000, w.DurationMs);
+        Assert.Equal(50, w.Z);
+        Assert.Equal(100, w.X);
+        Assert.Equal(new[] { 120, 150, 95, 130 }, w.Gaps);
+    }
+
+    [Fact]
     public void Reset_ClearsState()
     {
         var e = new OpenSignalEngine();
