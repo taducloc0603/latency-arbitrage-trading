@@ -6,26 +6,6 @@ namespace LatencyArbTool.Tests;
 public sealed class CsvLoggerTests
 {
     [Fact]
-    public void LogTick_WritesGapColumns()
-    {
-        InTempDir(logsDir =>
-        {
-            using (var logger = new CsvLogger(logsDir))
-            {
-                var a = new TickRecord(1, 900, 100, 101, 1, 1, "XAUUSD");
-                var b = new TickRecord(1, 850, 99.5, 100.5, 1, 1, "XAUUSD");
-                logger.LogTick(nowMs: 1234, a, b, gapBuy: 50, gapSell: -50);
-            } // dispose closes the writers before we read the file (Windows file lock)
-
-            var ticks = Directory.GetFiles(logsDir, "ticks_*.csv").Single();
-            var lines = File.ReadAllLines(ticks);
-            Assert.Equal("timestamp,bidA,askA,bidB,askB,gapBuy,gapSell", lines[0]);
-            Assert.Contains("1234,", lines[1]);
-            Assert.EndsWith(",50,-50", lines[1]);
-        });
-    }
-
-    [Fact]
     public void LogEvent_WritesReason()
     {
         InTempDir(logsDir =>
@@ -35,7 +15,7 @@ public sealed class CsvLoggerTests
                 logger.LogEvent(new DryRunEvent(
                     "live close", "stop loss", BotState.Idle, 1, ClusterId: 7,
                     Side: DryRunSide.BuyB, ClosePrice: 99.5, PnlRaw: -50));
-            }
+            } // dispose closes the writer before we read the file (Windows file lock)
 
             var events = Directory.GetFiles(logsDir, "events_*.csv").Single();
             var lines = File.ReadAllLines(events);

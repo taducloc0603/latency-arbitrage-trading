@@ -212,7 +212,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var events = _trailingEngine.Step(b.Bid, b.Ask, signal, nowMs, config);
 
         UpdateMarketUi(a, b, gapBuy, gapSell, config);
-        _csvLogger?.LogTick(nowMs, a, b, gapBuy, gapSell);
 
         foreach (var e in events)
         {

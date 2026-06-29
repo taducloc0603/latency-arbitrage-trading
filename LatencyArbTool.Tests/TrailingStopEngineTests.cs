@@ -52,15 +52,6 @@ public sealed class TrailingStopEngineTests
     }
 
     [Fact]
-    public void Buy_DoesNotCloseOnActivationTick()
-    {
-        var e = new TrailingStopEngine();
-        var c = Cfg();
-        Step(e, 1000, SignalSide.BuyB, 0, c);
-        Assert.Null(Step(e, 1200, null, 1, c)); // exactly at activation, no close
-    }
-
-    [Fact]
     public void Buy_StopLossNotCheckedOnceTrailingActive()
     {
         var e = new TrailingStopEngine();

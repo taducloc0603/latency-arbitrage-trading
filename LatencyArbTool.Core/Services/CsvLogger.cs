@@ -5,9 +5,10 @@ using LatencyArbTool.Core.Models;
 
 namespace LatencyArbTool.Core.Services;
 
+// Logs only meaningful events (open / close). Per-tick logging was dropped — it
+// produced ~40 rows/sec with no consumer after the stats/simulation code was removed.
 public sealed class CsvLogger : IDisposable
 {
-    private readonly StreamWriter _ticks;
     private readonly StreamWriter _events;
 
     public CsvLogger(string logsDirectory)
@@ -15,23 +16,8 @@ public sealed class CsvLogger : IDisposable
         Directory.CreateDirectory(logsDirectory);
 
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        _ticks = Create(Path.Combine(logsDirectory, $"ticks_{stamp}.csv"));
         _events = Create(Path.Combine(logsDirectory, $"events_{stamp}.csv"));
-
-        _ticks.WriteLine("timestamp,bidA,askA,bidB,askB,gapBuy,gapSell");
         _events.WriteLine("timestamp,clusterId,decision,reason,side,openPrice,closePrice,pnlPoints,holdMs,trailingActive");
-    }
-
-    public void LogTick(long nowMs, TickRecord a, TickRecord b, int gapBuy, int gapSell)
-    {
-        _ticks.WriteLine(string.Join(',',
-            nowMs,
-            F(a.Bid),
-            F(a.Ask),
-            F(b.Bid),
-            F(b.Ask),
-            gapBuy,
-            gapSell));
     }
 
     public void LogEvent(DryRunEvent e)
@@ -49,17 +35,9 @@ public sealed class CsvLogger : IDisposable
             e.TrailingActive));
     }
 
-    public void Flush()
-    {
-        _ticks.Flush();
-        _events.Flush();
-    }
+    public void Flush() => _events.Flush();
 
-    public void Dispose()
-    {
-        _ticks.Dispose();
-        _events.Dispose();
-    }
+    public void Dispose() => _events.Dispose();
 
     private static StreamWriter Create(string path)
     {
