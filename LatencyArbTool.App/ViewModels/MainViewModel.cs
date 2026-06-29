@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Windows.Threading;
 using LatencyArbTool.App.Services;
@@ -36,6 +37,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusA = "Disconnected";
     private string _statusB = "Disconnected";
     private string _statusBTrade = "Disconnected";
+    private string _statusBHistory = "Disconnected";
+    private int _lastHistoryCount = -1;
     private string _symbolA = "-";
     private string _symbolB = "-";
     private string _bidA = "-";
@@ -90,6 +93,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string StatusA { get => _statusA; private set => SetProperty(ref _statusA, value); }
     public string StatusB { get => _statusB; private set => SetProperty(ref _statusB, value); }
     public string StatusBTrade { get => _statusBTrade; private set => SetProperty(ref _statusBTrade, value); }
+    public string StatusBHistory { get => _statusBHistory; private set => SetProperty(ref _statusBHistory, value); }
     public string SymbolA { get => _symbolA; private set => SetProperty(ref _symbolA, value); }
     public string SymbolB { get => _symbolB; private set => SetProperty(ref _symbolB, value); }
     public string BidA { get => _bidA; private set => SetProperty(ref _bidA, value); }
@@ -105,6 +109,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string LiveStatus { get => _liveStatus; private set => SetProperty(ref _liveStatus, value); }
 
     public ObservableCollection<string> Logs { get; } = [];
+    public ObservableCollection<BTradeRow> BTrades { get; } = [];
+    public ObservableCollection<BHistoryRow> BHistory { get; } = [];
     public RelayCommand LoadConfigCommand { get; }
     public RelayCommand CheckMapsCommand { get; }
     public RelayCommand StartCommand { get; }
@@ -199,7 +205,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
         var bHistory = _historyReader.TryReadForTickMap(MapNameB);
-        StatusBTrade = bTrades.Success ? $"Connected: {bTrades.Count} open" : $"Disconnected: {bTrades.Error}";
+        UpdateBTradesUi(bTrades);
+        UpdateBHistoryUi(bHistory);
 
         if (tickA.Tick is null || tickB.Tick is null)
         {
@@ -366,6 +373,85 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         TrailingState = pos.TrailingActive
             ? $"active, ref={(pos.Side == SignalSide.BuyB ? pos.HighestPoint : pos.LowestPoint)}"
             : $"SL@{(pos.Side == SignalSide.BuyB ? pos.EntryPoint - config.StopLossPoint : pos.EntryPoint + config.StopLossPoint)}";
+    }
+
+    private void UpdateBTradesUi(TradeReadResult r)
+    {
+        StatusBTrade = r.Success ? $"Connected: {r.Count} open" : $"Disconnected: {r.Error}";
+        if (!r.Success)
+        {
+            BTrades.Clear();
+            return;
+        }
+
+        // Drop rows whose ticket is gone.
+        var tickets = r.Trades.Select(t => t.Ticket).ToHashSet();
+        for (var i = BTrades.Count - 1; i >= 0; i--)
+        {
+            if (!tickets.Contains(BTrades[i].Ticket))
+            {
+                BTrades.RemoveAt(i);
+            }
+        }
+
+        // Add new tickets; update Profit in place for existing ones (live, no flicker).
+        foreach (var t in r.Trades)
+        {
+            var row = BTrades.FirstOrDefault(x => x.Ticket == t.Ticket);
+            if (row is null)
+            {
+                BTrades.Add(new BTradeRow
+                {
+                    Ticket = t.Ticket,
+                    Side = t.Side.ToString(),
+                    Lot = t.Lot,
+                    OpenPrice = t.Price,
+                    StopLoss = t.StopLoss,
+                    TakeProfit = t.TakeProfit,
+                    Profit = t.Profit,
+                });
+            }
+            else
+            {
+                row.Profit = t.Profit;
+            }
+        }
+    }
+
+    private void UpdateBHistoryUi(HistoryReadResult r)
+    {
+        StatusBHistory = r.Success ? $"Connected: {r.Count} closed" : $"Disconnected: {r.Error}";
+        if (!r.Success || r.Count == _lastHistoryCount)
+        {
+            return;
+        }
+
+        _lastHistoryCount = r.Count;
+        BHistory.Clear();
+        // Newest first, cap to keep the grid light.
+        foreach (var h in r.History.Reverse().Take(200))
+        {
+            BHistory.Add(new BHistoryRow(
+                h.Ticket,
+                h.Side.ToString(),
+                h.OpenPrice,
+                h.ClosePrice,
+                h.Profit,
+                h.Commission,
+                FormatTime(h.CloseTimeMsc)));
+        }
+    }
+
+    private static string FormatTime(ulong epochMs)
+    {
+        if (epochMs == 0)
+        {
+            return "-";
+        }
+
+        return DateTimeOffset.FromUnixTimeMilliseconds((long)epochMs)
+            .ToLocalTime()
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
     }
 
     private void AddLog(string message)

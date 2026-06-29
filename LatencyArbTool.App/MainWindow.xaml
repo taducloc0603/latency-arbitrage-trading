@@ -4,8 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Latency Arb Live" Height="720" Width="1080"
-        MinHeight="600" MinWidth="900">
+        Title="Latency Arb Live" Height="760" Width="1180"
+        MinHeight="640" MinWidth="980">
     <Window.Resources>
         <Style TargetType="TextBlock">
             <Setter Property="Margin" Value="0,0,0,4" />
@@ -84,8 +84,6 @@
                     <TextBlock Text="{Binding BidB}" Style="{StaticResource ValueText}" />
                     <TextBlock Text="Ask" />
                     <TextBlock Text="{Binding AskB}" Style="{StaticResource ValueText}" />
-                    <TextBlock Text="Trade map" />
-                    <TextBlock Text="{Binding StatusBTrade}" Style="{StaticResource ValueText}" />
                 </UniformGrid>
             </GroupBox>
 
@@ -106,9 +104,55 @@
                 </UniformGrid>
             </GroupBox>
 
-            <GroupBox Header="Event Log" Grid.Row="1" Grid.ColumnSpan="3">
-                <ListBox ItemsSource="{Binding Logs}" FontFamily="Consolas" FontSize="12" />
-            </GroupBox>
+            <Grid Grid.Row="1" Grid.ColumnSpan="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                </Grid.ColumnDefinitions>
+
+                <TabControl Grid.Column="0" Margin="0,0,12,0">
+                    <TabItem Header="B Trade">
+                        <DockPanel Margin="8">
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding StatusBTrade}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <DataGrid ItemsSource="{Binding BTrades}" AutoGenerateColumns="False"
+                                      IsReadOnly="True" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                                      CanUserAddRows="False" FontFamily="Consolas" FontSize="12">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Ticket" Binding="{Binding Ticket}" Width="Auto" />
+                                    <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="Auto" />
+                                    <DataGridTextColumn Header="Lot" Binding="{Binding Lot, StringFormat=0.##}" Width="Auto" />
+                                    <DataGridTextColumn Header="Open" Binding="{Binding OpenPrice, StringFormat=0.#####}" Width="*" />
+                                    <DataGridTextColumn Header="Profit" Binding="{Binding Profit, StringFormat=0.##}" Width="Auto" />
+                                    <DataGridTextColumn Header="SL" Binding="{Binding StopLoss, StringFormat=0.#####}" Width="*" />
+                                    <DataGridTextColumn Header="TP" Binding="{Binding TakeProfit, StringFormat=0.#####}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </TabItem>
+                    <TabItem Header="B History">
+                        <DockPanel Margin="8">
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding StatusBHistory}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <DataGrid ItemsSource="{Binding BHistory}" AutoGenerateColumns="False"
+                                      IsReadOnly="True" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                                      CanUserAddRows="False" FontFamily="Consolas" FontSize="12">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Ticket" Binding="{Binding Ticket}" Width="Auto" />
+                                    <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="Auto" />
+                                    <DataGridTextColumn Header="Open" Binding="{Binding OpenPrice, StringFormat=0.#####}" Width="*" />
+                                    <DataGridTextColumn Header="Close" Binding="{Binding ClosePrice, StringFormat=0.#####}" Width="*" />
+                                    <DataGridTextColumn Header="Profit" Binding="{Binding Profit, StringFormat=0.##}" Width="Auto" />
+                                    <DataGridTextColumn Header="Comm" Binding="{Binding Commission, StringFormat=0.##}" Width="Auto" />
+                                    <DataGridTextColumn Header="Close time" Binding="{Binding CloseTime}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </TabItem>
+                </TabControl>
+
+                <GroupBox Header="Event Log" Grid.Column="1">
+                    <ListBox ItemsSource="{Binding Logs}" FontFamily="Consolas" FontSize="12" />
+                </GroupBox>
+            </Grid>
         </Grid>
     </DockPanel>
 </Window>
