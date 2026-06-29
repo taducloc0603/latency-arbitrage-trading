@@ -45,6 +45,7 @@
                 <TextBlock Text="Trade HWND B" Margin="0,0,8,0" />
                 <TextBox Text="{Binding TradeHwndText, UpdateSourceTrigger=PropertyChanged}" Width="120" MinWidth="120" />
                 <Button Content="Check HWND" Command="{Binding CheckHwndCommand}" />
+                <Button Content="Save Config" Command="{Binding SaveConfigCommand}" />
             </WrapPanel>
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="HWND: " />

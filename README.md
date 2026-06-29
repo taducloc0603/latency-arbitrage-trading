@@ -125,11 +125,15 @@ UI nap khi bam **Load Config**; co the nap lai runtime.
 ### Setup Supabase (1 lan)
 
 1. **Tao bang**: SQL Editor -> chay [db/schema.sql](db/schema.sql).
-2. **Mo quyen doc cho anon** (neu bang da bat RLS):
+2. **Mo quyen doc + ghi cho anon** (neu bang da bat RLS). Doc de Load Config; update
+   de nut **Save Config** ghi nguoc HWND / map names:
    ```sql
    create policy "anon read configs"
      on public.configs for select
      to anon using (true);
+   create policy "anon update configs"
+     on public.configs for update
+     to anon using (true) with check (true);
    ```
 3. **Insert row** cho tung may (lay hostname bang `echo %COMPUTERNAME%`):
    ```sql

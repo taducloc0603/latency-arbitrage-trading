@@ -41,7 +41,39 @@ public sealed class SupabaseConfigRepository
         return row is null ? null : Map(row);
     }
 
+    // Writes back the editable fields (HWND + map names) to a row. Requires an
+    // anon UPDATE policy on the table. Returns null on success, else an error string.
+    public async Task<string?> UpdateHwndAndMapsAsync(
+        string id, string mapA, string mapB, string? chartHwndB, string? tradeHwndB, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return "config row id is empty";
+        }
+
+        var url = $"{_restBase}/{_table}?id=eq.{Uri.EscapeDataString(id)}";
+        var body = new
+        {
+            map_a = mapA,
+            map_b = mapB,
+            chart_hwnd_b = string.IsNullOrWhiteSpace(chartHwndB) ? null : chartHwndB,
+            trade_hwnd_b = string.IsNullOrWhiteSpace(tradeHwndB) ? null : tradeHwndB,
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Patch, url) { Content = JsonContent.Create(body) };
+        req.Headers.Add("Prefer", "return=minimal");
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        if (resp.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var detail = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        return $"{(int)resp.StatusCode} {detail}";
+    }
+
     private static StrategyConfig Map(ConfigRow r) => new(
+        Id: r.Id ?? string.Empty,
         GroupName: r.GroupName ?? string.Empty,
         Hostname: r.Hostname ?? string.Empty,
         Point: r.Point,
@@ -64,6 +96,7 @@ public sealed class SupabaseConfigRepository
 
     private sealed class ConfigRow
     {
+        [JsonPropertyName("id")] public string? Id { get; set; }
         [JsonPropertyName("group_name")] public string? GroupName { get; set; }
         [JsonPropertyName("hostname")] public string? Hostname { get; set; }
         [JsonPropertyName("point")] public int Point { get; set; }

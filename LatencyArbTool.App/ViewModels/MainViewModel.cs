@@ -72,6 +72,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         LoadConfigCommand = new RelayCommand(() => _ = LoadConfigAsync(), () => !IsRunning);
         CheckMapsCommand = new RelayCommand(CheckMaps);
         CheckHwndCommand = new RelayCommand(CheckHwnd);
+        SaveConfigCommand = new RelayCommand(() => _ = SaveConfigAsync(), () => !IsRunning && _config is not null);
         StartCommand = new RelayCommand(Start, () => !IsRunning && _config is not null);
         StopCommand = new RelayCommand(Stop, () => IsRunning);
     }
@@ -89,6 +90,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isRunning, value))
             {
                 LoadConfigCommand.RaiseCanExecuteChanged();
+                SaveConfigCommand.RaiseCanExecuteChanged();
                 StartCommand.RaiseCanExecuteChanged();
                 StopCommand.RaiseCanExecuteChanged();
             }
@@ -126,6 +128,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public RelayCommand LoadConfigCommand { get; }
     public RelayCommand CheckMapsCommand { get; }
     public RelayCommand CheckHwndCommand { get; }
+    public RelayCommand SaveConfigCommand { get; }
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
 
@@ -161,10 +164,52 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 $"point={config.Point}  x(open)={config.OpenPts}  y(ms)={config.OpenHoldConfirmMs}  z(sustain)={config.OpenConfirmGapPts}  " +
                 $"SL={config.StopLossPoint}  trailStart={config.TrailingStartPoint}  trailStep={config.TrailingStepPoint}";
             StartCommand.RaiseCanExecuteChanged();
+            SaveConfigCommand.RaiseCanExecuteChanged();
         }
         catch (Exception ex)
         {
             ConfigStatus = $"Config load failed: {ex.Message}";
+        }
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        if (_config is not { } config)
+        {
+            LiveStatus = "Save: no config loaded";
+            return;
+        }
+
+        var url = Environment.GetEnvironmentVariable("SUPABASE_URL");
+        var key = Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY");
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(key))
+        {
+            LiveStatus = "Save failed: missing SUPABASE_URL / SUPABASE_ANON_KEY";
+            AddLog(LiveStatus);
+            return;
+        }
+
+        try
+        {
+            var repo = new SupabaseConfigRepository(url, key, SharedHttp);
+            var error = await repo.UpdateHwndAndMapsAsync(config.Id, MapNameA, MapNameB, ChartHwndText, TradeHwndText)
+                .ConfigureAwait(true);
+            if (error is null)
+            {
+                _config = config with { MapA = MapNameA, MapB = MapNameB, ChartHwndB = ChartHwndText, TradeHwndB = TradeHwndText };
+                LiveStatus = "Saved config to DB";
+                AddLog($"saved config to Supabase (group '{config.GroupName}')");
+            }
+            else
+            {
+                LiveStatus = $"Save failed: {error}";
+                AddLog(LiveStatus);
+            }
+        }
+        catch (Exception ex)
+        {
+            LiveStatus = $"Save failed: {ex.Message}";
+            AddLog(LiveStatus);
         }
     }
 
@@ -198,9 +243,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void Start()
     {
-        if (_config is null)
+        if (_config is not { } config)
         {
             AddLog("cannot start: no config loaded");
+            return;
+        }
+
+        var problems = ValidateForStart(config);
+        if (problems.Count > 0)
+        {
+            var msg = "cannot start: " + string.Join("; ", problems);
+            LiveStatus = msg;
+            AddLog(msg);
             return;
         }
 
@@ -215,6 +269,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IsRunning = true;
         _timer.Start();
         AddLog($"start; logs at {logsDirectory}");
+    }
+
+    // Pre-flight checks: only allow Start when params, maps and HWNDs are valid.
+    private List<string> ValidateForStart(StrategyConfig config)
+    {
+        var problems = new List<string>();
+
+        if (config.Point <= 0) problems.Add("point<=0");
+        if (config.OpenHoldConfirmMs <= 0) problems.Add("y(open_hold_confirm_ms)<=0");
+        if (config.StopLossPoint <= 0) problems.Add("stop_loss_point<=0");
+        if (config.TrailingStartPoint <= 0) problems.Add("trailing_start_point<=0");
+        if (config.TrailingStepPoint <= 0) problems.Add("trailing_step_point<=0");
+
+        if (!_reader.MapExists(MapNameA)) problems.Add("map A missing");
+        if (!_reader.MapExists(MapNameB)) problems.Add("map B missing");
+        if (!_tradeReader.MapExistsForTickMap(MapNameB)) problems.Add("B trade map missing");
+
+        if (!HwndParser.TryParse(ChartHwndText, out var chart, out _) || !_mt5Engine.IsValidWindow(chart, out _))
+            problems.Add("chart HWND invalid/not found");
+        if (!HwndParser.TryParse(TradeHwndText, out var trade, out _) || !_mt5Engine.IsValidWindow(trade, out _))
+            problems.Add("trade HWND invalid/not found");
+
+        return problems;
     }
 
     private void Stop()

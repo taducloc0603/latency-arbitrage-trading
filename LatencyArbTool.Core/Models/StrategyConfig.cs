@@ -4,6 +4,7 @@ namespace LatencyArbTool.Core.Models;
 // old compile-time StrategyDefaults consts. All point fields are in "points"
 // (price * Point).
 public sealed record StrategyConfig(
+    string Id,                 // DB row id (for write-back); empty for Default
     string GroupName,
     string Hostname,
     int Point,                 // price -> point multiplier
@@ -20,6 +21,7 @@ public sealed record StrategyConfig(
 {
     // Sensible offline fallback for tests / first run before a row is loaded.
     public static StrategyConfig Default { get; } = new(
+        Id: "",
         GroupName: "default",
         Hostname: "",
         Point: 100,

@@ -23,6 +23,11 @@ create table if not exists public.configs (
 create index if not exists configs_hostname_active_idx
   on public.configs (hostname, is_active, created_at desc);
 
+-- If RLS is enabled, allow anon to read and to update (for the app's "Save Config"
+-- write-back of HWND / map names). Do NOT grant insert/delete to anon.
+-- create policy "anon read configs"   on public.configs for select to anon using (true);
+-- create policy "anon update configs" on public.configs for update to anon using (true) with check (true);
+
 -- Example row
 insert into public.configs
   (group_name, hostname, point, open_pts, open_hold_confirm_ms, open_confirm_gap_pts,
