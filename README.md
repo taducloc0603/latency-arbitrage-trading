@@ -1,180 +1,244 @@
 # Latency Arb Live
 
-Tai lieu nay ghi lai cac thong so va dieu kien dong/mo lenh hien tai cua tool.
+Tool theo doi 2 feed gia tren MT (A = san nhanh / lead, B = san cham / lag). Khi
+gap A-B mo rong va duy tri du lau, bot mo lenh tren B theo huong B se catch-up A.
+Dong lenh bang Stop-Loss, chuyen sang Trailing-Stop khi da co lai du nguong.
 
-## Tong quan chien luoc
+---
 
-Tool theo doi 2 feed gia (A nhanh, B cham). Khi gap giua A va B mo rong vuot nguong va duy tri du lau (sustained), bot mo lenh tren B theo huong B se catch-up A. Khi gap ve 0 hoac A dao chieu, bot dong lenh.
-
-Trinh tu xac nhan tin hieu chia 3 phase de loc cac brief spike (gap nhay extreme nhung B catch up qua nhanh, vuot khoi window thi truoc khi MT5 kip vao lenh):
-
-1. **Confirm** (`500ms`): gap phai vuot threshold lien tuc.
-2. **Re-check** (`200ms`): tiep tuc giu threshold them; tong wait `700ms`.
-3. **Stability** (cuoi Re-check): gap hien tai phai >= `65%` cua peak quan sat trong toan bo window. Loc cac signal qua dinh roi revert manh, nhung van cho phep cac sustained signal voi peak cao moderate.
-
-Sau khi mo, MinHoldMs ngan (`3000ms`) + AReversalUsd thap (`$0.40`) cho phep dong som ngay khi A dao chieu, tranh expose voi market drift trong khi giu lenh.
-
-### Filter chinh
-
-Bot SKIP trade hoan toan trong cac dieu kien:
-
-- **Feed B silent qua lau** (`FeedBStaleMs = 3000ms`): khi B khong co tick moi trong 3s, bot khong tin tuong gap (B co the dang stuck/dead). Day la filter chinh giup tranh run-6-style market (broker B sparse + trending) — cac phien thua nang nhat.
-- **A volatility thap** (`MinAVolPoints = 50`): A khong di chuyen du, gap khong reverable.
-- **Spread B bat thuong** (`> 2.5x median`): broker B dang giam dia, fill gia toi.
-
-## Calibration log (V1, sweep tren polling-emulated sim)
-
-Sau khi phat hien event-driven sim under-count engine evaluation va polling-emulated sim moi la reference dung, da sweep parameters de tim combo profitable:
-
-| Run | Real outcome | Sim V1 (current) |
-|-----|--------------|------------------|
-| Run 4 (50min, normal market) | 9 trades, +$78 | **3 trades, 100% WR, +18.77** |
-| Run 2 (15min, normal market) | 12 trades, +$22 | **2 trades, 100% WR, +1.37** |
-| Run 6 (88min, sparse B + trending) | 15 trades, **-$405** | **0 trades** (skipped) |
-| Run 7 (13min, sparse B) | 3 trades, **-$154** | **0 trades** (skipped) |
-
-V1 trade-off: ~5x ít volume hon V0 (`StabilityRatio=0.40`) nhung 100% WR + bo qua hoan toan cac phien thua. Strategy "selective quality" thay vi "high frequency".
-
-## Du lieu dau vao
-
-- Map A mac dinh: `Local\MT_A_Tick`
-- Map B mac dinh: `Local\MT_B_Tick`
-- Tool doc tick tu shared memory, layout tick hien tai: `seq:int32` (monotonic counter — moi `OnTick` increment 1, dung de detect missed polls), `ea_ms:uint64`, padding `4` bytes, `Bid`, `Ask`, `Spread`, `TickTimeMsc`, `Symbol[16]`.
-- `ea_ms` la clock monotonic tu Windows `GetTickCount64` ben EA, khong phai Unix epoch.
-- `Latency` duoc tinh uu tien bang `Environment.TickCount64 - ea_ms`. Gia tri hop le phai nam trong khoang `0..86_400_000ms` (24h). Day la metric **chi de hien thi** cho user xem.
-- Neu `ea_ms` thieu/khong hop le, tool fallback sang `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - TickTimeMsc` khi `TickTimeMsc` la Unix epoch milliseconds hop le. Neu ca 2 nguon khong hop le thi hien `unknown`.
-- `nowTickCountMs` duoc capture **ngay sau khi doc xong tickA va tickB**, giam thoi gian troi giua EA ghi `ea_ms` va C# doc latency.
-- **Stale check dung "silence" thay vi "latency"** ([FeedFreshnessTracker.cs](LatencyArbTool.Core/Services/FeedFreshnessTracker.cs)): track thoi gian ke tu lan cuoi `ea_ms` thay doi (tick moi den). Quiet market khien tick sparse → silence reset moi tick mới → feed van duoc coi la khoe. Feed thuc su die → silence tang den threshold → block. Tranh false positive cho sparse-but-alive feed (P95 B interval 2.3s trong run 6 khong block bot).
-- **Polling miss detection** ([SequenceTracker.cs](LatencyArbTool.Core/Services/SequenceTracker.cs)): EA increment `seq` moi tick. Tool track delta giua cac poll. Neu `seq_delta > 1` → tool da bo lo (delta - 1) tick giua 2 lan poll → trong khoang \"miss\" do co the co tick gap revert ma signal engine khong thay → signal engine **reset state** (`PollMissedTicks` field tren `MarketSnapshot`). Tranh false sustained signal khi tick rate vuot polling rate.
-- DispatcherTimer interval `25ms` (giam tu `50ms`) → giam tan suat miss tick. Ket hop voi seq tracker, polling artifact gan nhu duoc loai bo.
-- Live safety chi check lenh that o feed B. Tu `MapNameB`, tool derive map trade/history bang cach thay hau to `Tick`: `Local\MT_B_Tick` -> `Local\MT_B_Trade` va `Local\MT_B_History`. Trade co fallback `Local\MT_B_Trades` de tuong thich writer cu.
-- Symbol A/B khong can giong nhau. Dieu kien `symbol mismatch` da duoc bo.
-
-## Cong thuc va nguong
-
-- `GapBuy = round((B.Bid - A.Ask) * 100)`
-- `GapSell = round((B.Ask - A.Bid) * 100)`
-- Rolling window thong ke: `5` phut.
-- Can toi thieu `500` samples truoc khi dung dynamic threshold.
-- Khi chua du `500` samples (warmup):
-  - `OpenBuyThreshold = -80`
-  - `OpenSellThreshold = 60`
-- Khi du samples (post-warmup):
-  - `OpenBuyThreshold = min(median(GapBuy) - 3.0 * std(GapBuy), -80)`
-  - `OpenSellThreshold = max(median(GapSell) + 3.0 * std(GapSell), 60)`
-  - Floor `-80 / +60` la san: dynamic chi duoc dung khi extreme hon. Trong market calm, std nho khien dynamic lon hon san; khi do bot dung san de tranh trade tren noise.
-- Nguong dong co dinh:
-  - `CloseBuyRevert = 0`
-  - `CloseSellRevert = 0`
-- Feed stale (silence-based, KHONG phai latency):
-  - Feed A stale neu silence (ms ke tu `ea_ms` doi cuoi cung) `> 10000ms`, hoac latency khong hop le.
-  - Feed B stale neu silence `> 3000ms`, hoac latency khong hop le.
-  - Trong quiet market, silence reset moi khi co tick moi → khong false positive.
-- Spread B bat thuong neu `MedianSpreadB > 0` va `SpreadB > MedianSpreadB * 2.5`.
-- A volatility filter: tinh range `max(midA) - min(midA)` trong rolling `60s`. Neu `ARangePoints < 50` thi chan mo lenh (`A volatility low`).
-
-## Dieu kien mo lenh
-
-Tool chi mo lenh moi khi:
-
-- Dang khong co cluster/lenh dang giu.
-- Bot khong o trang thai `Emergency`.
-- Feed A khong stale.
-- Feed B khong stale.
-- Spread B khong bat thuong.
-- A volatility (range 60s) khong qua thap (`>= 50` points).
-- Tin hieu pass ca 3 phase Confirm + Re-check + Stability (xem chi tiet o muc Tong quan).
-- B trade map phai doc duoc va khong co lenh B dang mo; neu khong verify duoc thi live open bi chan.
-
-Mo `BuyB` khi `GapBuy <= OpenBuyThreshold` qua duoc 3-phase. Gia mo la `B.Ask`.
-Mo `SellB` khi `GapSell >= OpenSellThreshold` qua duoc 3-phase. Gia mo la `B.Bid`.
-
-Neu ca Buy va Sell cung du dieu kien, tool chon ben manh hon theo do lech so voi median/std:
-
-- Score Buy = `abs(GapBuy - MedianBuy) / StdBuy`
-- Score Sell = `abs(GapSell - MedianSell) / StdSell`
-- Score nao lon hon thi chon ben do. Neu bang nhau thi chon `BuyB`.
-
-## Dieu kien dong lenh
-
-Lenh dang giu se khong dong theo revert/reversal truoc `3000ms`, tru khi bi emergency. Thoi gian giu toi da la `90000ms`.
-
-Dong `BuyB` khi mot trong cac dieu kien sau dung:
-
-- Feed A stale/invalid hoac bot vao `Emergency`: dong ngay tai `B.Bid`.
-- Da giu toi thieu `3000ms` va `A.Ask <= PeakAskA - 0.40`: dong tai `B.Bid`.
-- Da giu toi thieu `3000ms` va `GapBuy >= 0`: dong tai `B.Bid`.
-- Da giu `>= 90000ms`: dong tai `B.Bid`.
-
-Dong `SellB` khi mot trong cac dieu kien sau dung:
-
-- Feed A stale/invalid hoac bot vao `Emergency`: dong ngay tai `B.Ask`.
-- Da giu toi thieu `3000ms` va `A.Bid >= TroughBidA + 0.40`: dong tai `B.Ask`.
-- Da giu toi thieu `3000ms` va `GapSell <= 0`: dong tai `B.Ask`.
-- Da giu `>= 90000ms`: dong tai `B.Ask`.
-
-Live close chi duoc gui neu B trade map doc duoc, co it nhat mot lenh dang mo o row 0, va side cua row 0 khop voi side strategy can dong.
-
-## Emergency va resume
-
-- Feed A stale/invalid dua bot vao `Emergency`.
-- Neu dang co lenh, bot dong lenh ngay khi vao emergency.
-- Bot thoat `Emergency` sau `10` tick A lien tiep co latency `<= 1000ms`.
-
-## Lot va stack
-
-- `MaxStack = 1`, nen hien tai moi cluster chi co toi da 1 order.
-- Neu sau nay tang `MaxStack`, stack chi xay ra sau cooldown `1000ms` va gap van con extreme:
-  - BuyB stack khi `GapBuy <= OpenBuyThreshold`.
-  - SellB stack khi `GapSell >= OpenSellThreshold`.
-- Lot theo do lon cua gap (chi anh huong dry-run accounting; lot thuc khi live set san tren chart MT5):
-  - `abs(gap) <= 60`: lot `8.0`
-  - `abs(gap) <= 70`: lot `7.0`
-  - `abs(gap) > 70`: lot `5.0`
-
-## Noi chinh sua tham so chien luoc
-
-Tat ca cac hang so cau hinh nam tap trung tai [LatencyArbTool.Core/Services/StrategyDefaults.cs](LatencyArbTool.Core/Services/StrategyDefaults.cs).
-
-### Tin hieu (3-phase)
-
-- `ConfirmMs` (`500`): Phase 1 - gap phai vuot threshold lien tuc bao lau truoc khi vao re-check.
-- `ReCheckMs` (`200`): Phase 2 - sau confirm, cho them bao lau roi moi danh gia stability. Tong wait `700ms`.
-- `StabilityRatio` (`0.65`): Phase 3 - cuoi re-check, `|currentGap|` phai >= ratio nay nhan voi `|peakGap|` quan sat trong window. V1 strict — confirmed via run 8 (2.6h moderate market, 0 trades CORRECT vs V2 0.55 = 9 trades 11% WR -16.88). Strategy chi trade khi co arb opportunity that su, skip cac noise market.
-
-### Threshold
-
-- `FixedOpenBuyFallback` / `FixedOpenSellFallback` (`-80` / `60`): san floor cho threshold mo lenh. Cung la nguong dung trong warmup.
-- `KStd` (`3.0`): he so nhan std cho dynamic threshold sau warmup.
-- `WarmupMinSamples` (`500`): so sample toi thieu truoc khi dung dynamic.
-- `MedianWindowMinutes` (`5`): cua so rolling thong ke.
-
-### Hold va close
-
-- `MinHoldMs` / `MaxHoldMs` (`3000` / `90000`): thoi gian giu lenh toi thieu va toi da.
-- `AReversalUsd` (`0.40`): muc retrace cua A truoc khi chot.
-- `CloseBuyRevertFallback` / `CloseSellRevertFallback` (`0` / `0`): nguong gap revert de dong.
-
-### Filter / safety
-
-- `FeedAStaleMs` / `FeedBStaleMs` (`10000` / `3000`): silence toi da cho tung feed (ms ke tu `ea_ms` doi cuoi). B threshold tight hon vi broker B sparse khien sim run-6-style market loss heavy — dat 3000ms block khoang 8% poll trong run 6 (chu yeu cac stretch B stall) nhung chi 0.4% trong run 4. Hieu qua chinh la skip run-6-style conditions hoan toan trong khi cho phep trade binh thuong.
-- `SpreadBMaxMultiplier` (`2.5`): bo signal khi spread B vuot `MedianSpreadB * he so` nay.
-- `AVolWindowMs` / `MinAVolPoints` (`60000` / `50`): cua so do volatility cua A va nguong toi thieu de cho phep mo lenh.
-
-### Stack va lot
-
-- `MaxStack` (`1`): order toi da trong 1 cluster.
-- `StackCooldownMs` (`1000`): khoang giua 2 lan stack.
-- `LotBandOneMaxGap` / `LotBandTwoMaxGap` (`60` / `70`): nguong `abs(gap)` de chia bands lot 8.0 / 7.0 / 5.0.
-
-Sau khi sua, build lai (`dotnet build`) va chay tests (`dotnet test LatencyArbTool.Tests/LatencyArbTool.Tests.csproj`) de chac chan khong vo logic.
-
-## Mo phong va backtest
-
-[LatencyArbTool.Tests/SimulationTests.cs](LatencyArbTool.Tests/SimulationTests.cs) chay lai engine voi tickA/tickB CSV trong `data/tick/`. Output trade list, win rate, block reasons. Goi:
+## 1. Cong thuc GAP (don vi point; `point` lay tu config, vd 100)
 
 ```
-dotnet test LatencyArbTool.Tests/LatencyArbTool.Tests.csproj --filter "SimulationTests" --logger "console;verbosity=detailed"
+GapBuy  = (int)(A.Bid * point) - (int)(B.Bid * point)
+GapSell = (int)(A.Ask * point) - (int)(B.Ask * point)
 ```
 
-Luu y: simulation gia dinh execution instant (khong co broker latency, khong co slippage). Sim PnL la upper bound so voi thuc te.
+- A cao hon B -> `GapBuy > 0`  -> BUY B  (B re, cho B chay len bat kip A).
+- A thap hon B -> `GapSell < 0` -> SELL B (B dat, cho B chay xuong bat kip A).
+
+Vi du (`point = 1`): A=4200, B=4100 -> `GapBuy = 100` -> BUY B.
+A=4100, B=4200 -> `GapSell = -100` -> SELL B.
+
+Code: [GapCalculator.cs](LatencyArbTool.Core/Services/GapCalculator.cs).
+
+---
+
+## 2. Dieu kien MO lenh (chi khi co signal)
+
+Tham so: `x = open_pts`, `y = open_hold_confirm_ms`, `z = open_confirm_gap_pts`.
+Signal phat ra khi (xem [OpenSignalEngine.cs](LatencyArbTool.Core/Services/OpenSignalEngine.cs)):
+
+```
+BUY  : GapBuy  >= z  giu lien tuc >= y ms,  va  GapBuy  cuoi >= x
+SELL : GapSell <= -z giu lien tuc >= y ms,  va  GapSell cuoi <= -x
+```
+
+1. **Sustain (z)**: moi tick trong window phai co `|gap| >= z`. Tut xuong duoi z -> reset window.
+2. **Confirm (y)**: dieu kien sustain giu lien tuc du `y` ms.
+3. **Final (x)**: gap cuoi `|gap| >= x` thi ban signal.
+
+> RULE BAT BUOC (khong duoc pha khi sua): viec **mo lenh chi thuc hien khi co
+> signal**. **Dong lenh KHONG can signal** (SL/trailing chay moi tick). Mo & dong
+> tuc thi, khong holding / cooldown. Moi thoi diem chi giu **mot** lenh (no stacking).
+
+---
+
+## 3. Dieu kien DONG lenh — Stop-Loss + Trailing-Stop
+
+Tham so: `stop_loss_point`, `trailing_start_point`, `trailing_step_point`.
+Thuan theo gia B. Quy uoc gia (theo MT5 thuc):
+
+```
+Entry   = gia fill   : BUY = B.Ask, SELL = B.Bid
+Current = gia dong   : BUY = B.Bid, SELL = B.Ask
+```
+Tat ca quy ve point (`gia * point`). Xem [TrailingStopEngine.cs](LatencyArbTool.Core/Services/TrailingStopEngine.cs).
+
+### BUY
+```
+1) Stop-Loss (khi chua active):   dong neu  Current <= Entry - stop_loss_point
+2) Kich hoat trailing:            khi       Current >= Entry + trailing_start_point
+                                  -> TrailingActive = true; Highest = Current
+3) Cap nhat (khi active):         Highest = max(Highest, Current)
+                                  TrailingStopPrice = Highest - trailing_step_point
+4) Dong trailing:                 dong neu  Current <= TrailingStopPrice
+```
+
+### SELL (guong)
+```
+1) Stop-Loss (khi chua active):   dong neu  Current >= Entry + stop_loss_point
+2) Kich hoat trailing:            khi       Current <= Entry - trailing_start_point
+                                  -> TrailingActive = true; Lowest = Current
+3) Cap nhat (khi active):         Lowest = min(Lowest, Current)
+                                  TrailingStopPrice = Lowest + trailing_step_point
+4) Dong trailing:                 dong neu  Current >= TrailingStopPrice
+```
+
+> Khi da active, SL khong con duoc kiem tra (trailing thay the).
+
+### Vi du (StopLoss=50, TrailingStart=200, TrailingStep=30, Entry=1000)
+```
+BUY:
+  Current <= 950                      -> dong (stop loss)
+  Current >= 1200                     -> active, Highest=1200, stop=1170
+  Highest 1200/1300/1450              -> stop 1170/1270/1420
+  Current <= TrailingStopPrice        -> dong (trailing stop)
+
+SELL:
+  Current >= 1050                     -> dong (stop loss)
+  Current <= 800                      -> active, Lowest=800, stop=830
+  Lowest 800/700/550                  -> stop 830/730/580
+  Current >= TrailingStopPrice        -> dong (trailing stop)
+```
+
+PnL khi dong (point): `BUY = Current - Entry`, `SELL = Entry - Current`.
+
+---
+
+## 4. Config tu Supabase
+
+Tat ca tham so nam o bang `public.configs` ([db/schema.sql](db/schema.sql)). Moi PC
+nap row moi nhat co `is_active = true` va `hostname = Environment.MachineName`
+(phan biet HOA/thuong). Map cot:
+
+| Config field | Cot DB |
+|---|---|
+| point (nhan gia) | `point` |
+| x — gap cuoi | `open_pts` |
+| y — confirm ms | `open_hold_confirm_ms` |
+| z — sustain floor | `open_confirm_gap_pts` |
+| StopLoss | `stop_loss_point` |
+| TrailingStart | `trailing_start_point` |
+| TrailingStep | `trailing_step_point` |
+| Map tick A / B | `map_a` / `map_b` |
+| HWND chart B / trade B | `chart_hwnd_b` / `trade_hwnd_b` |
+
+Code nap: [SupabaseConfigRepository.cs](LatencyArbTool.Core/Services/SupabaseConfigRepository.cs)
+(goi PostgREST `?hostname=eq.<host>&is_active=eq.true&order=created_at.desc&limit=1`).
+UI nap khi bam **Load Config**; co the nap lai runtime.
+
+### Setup Supabase (1 lan)
+
+1. **Tao bang**: SQL Editor -> chay [db/schema.sql](db/schema.sql).
+2. **Mo quyen doc cho anon** (neu bang da bat RLS):
+   ```sql
+   create policy "anon read configs"
+     on public.configs for select
+     to anon using (true);
+   ```
+3. **Insert row** cho tung may (lay hostname bang `echo %COMPUTERNAME%`):
+   ```sql
+   insert into public.configs
+     (group_name, hostname, point, open_pts, open_hold_confirm_ms, open_confirm_gap_pts,
+      stop_loss_point, trailing_start_point, trailing_step_point,
+      map_a, map_b, chart_hwnd_b, trade_hwnd_b)
+   values
+     ('LAP 1', 'DESKTOP-XXXX', 100, 80, 1000, 30,
+      50, 200, 30,
+      'Local\MT_A_Tick', 'Local\MT_B_Tick', '0x00180070', '0x0085089A');
+   ```
+
+### Credentials (bien moi truong)
+
+App doc 2 bien moi truong (KHONG commit key vao repo):
+
+```
+SUPABASE_URL       = https://<project>.supabase.co     (domain goc, KHONG kem /rest/v1)
+SUPABASE_ANON_KEY  = <anon key>
+```
+
+---
+
+## 5. Cau truc
+
+- [LatencyArbTool.Core](LatencyArbTool.Core) — logic (gap, signal, trailing, config, readers). net10.0.
+- [LatencyArbTool.App](LatencyArbTool.App) — WPF UI + orchestration ([MainViewModel.cs](LatencyArbTool.App/ViewModels/MainViewModel.cs)). net10.0-windows.
+- [LatencyArbTool.Tests](LatencyArbTool.Tests) — xUnit.
+- `DataExporter/MQ5` — EA MT5 ghi tick/trade/history vao shared memory (giu nguyen).
+- `native/mt5engine-capi` — DLL C/C++ click/close MT5 (giu nguyen).
+
+## 6. Build & test (dev)
+
+```
+dotnet build LatencyArbTool.sln
+dotnet test LatencyArbTool.Tests/LatencyArbTool.Tests.csproj
+```
+
+---
+
+## 7. Build & deploy tren VPS (Windows)
+
+### CI tu dong (khuyen nghi)
+
+Workflow [build-release-windows.yml](.github/workflows/build-release-windows.yml) chay
+khi push len branch `dev`: build solution (Release) -> test -> build native DLL
+(MSVC) -> publish self-contained win-x64 -> tao **GitHub Release** `v1.0.<run_number>`
+voi asset:
+- `LatencyArbTool.App-<ver>.exe` (single-file self-contained)
+- `LatencyArbTool.App-<ver>-portable-win-x64.zip` (folder portable, kem `mt5engine-capi.dll`)
+
+> Luu y: moi push len `dev` deu cat 1 release moi. Neu chua muon phat hanh ban dang
+> do, push vao branch khac roi mo PR.
+
+### Trien khai len VPS bang script
+
+VPS **khong can .NET SDK** (ban self-contained). Dung [deploy/update.ps1](deploy/update.ps1):
+
+```powershell
+# Lay <ver> = 1.0.<run_number> tu trang Releases tren GitHub.
+# Lan dau: set luon Supabase creds.
+.\update.ps1 -Version 1.0.34 `
+  -SupabaseUrl "https://<project>.supabase.co" `
+  -SupabaseAnonKey "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
+
+# Cac lan sau (env da luu) chi can:
+.\update.ps1 -Version 1.0.35
+```
+
+Script se: stop app dang chay -> backup `C:\LatencyArbTool\app` -> tai zip release ->
+giai nen -> validate co `LatencyArbTool.App.exe` + `mt5engine-capi.dll` -> set env
+Supabase (neu truyen) -> tao shortcut Desktop -> start app.
+
+### Chuan bi MT5 tren VPS
+
+1. Mo MT5, mo chart san A va san B.
+2. Attach EA `DataExporter` ([DataExporter/MQ5](DataExporter/MQ5)) len tung chart de ghi
+   shared memory: `Local\MT_A_Tick`, `Local\MT_B_Tick` (+ map trade/history cua B).
+3. Lay **HWND** cua chart B (de click buy/sell) va panel trade B (de close), dien vao
+   row config (`chart_hwnd_b`, `trade_hwnd_b`).
+4. **Lot size set thu cong tren chart MT5** — tool khong set lot.
+
+### Chay lan dau
+
+1. Mo app (shortcut) -> **Load Config** (status bao `Loaded '<group>' for <host>`).
+2. **Check Maps** -> A / B / BTrade = Connected.
+3. **Start** -> theo doi Event Log: mo lenh khi du signal (x/y/z), dong bang SL/trailing.
+4. **Test tren tai khoan DEMO truoc** khi chay that.
+
+### Build tu source tren VPS (tuy chon)
+
+Neu muon build truc tiep (khong qua release):
+
+```powershell
+# 1. Cai .NET 10 SDK
+winget install --id Microsoft.DotNet.SDK.10 -e
+
+# 2. Native DLL can Build Tools for Visual Studio (workload C++).
+#    Trong "x64 Native Tools Command Prompt for VS":
+cl /nologo /std:c++17 /EHsc /DWIN32 /D_WINDOWS /D_USRDLL /D_WINDLL /DUNICODE /D_UNICODE ^
+   /I native\mt5engine-capi /c native\mt5engine-capi\engine.cpp /Fo:native-build\engine.obj
+cl /nologo /std:c++17 /EHsc /DWIN32 /D_WINDOWS /D_USRDLL /D_WINDLL /DUNICODE /D_UNICODE ^
+   /I native\mt5engine-capi /c native\mt5engine-capi\c_api.cpp /Fo:native-build\c_api.obj
+link /nologo /DLL /OUT:native-build\mt5engine-capi.dll native-build\engine.obj ^
+   native-build\c_api.obj user32.lib kernel32.lib comctl32.lib
+
+# 3. Publish app self-contained
+dotnet publish LatencyArbTool.App\LatencyArbTool.App.csproj -c Release -r win-x64 `
+  --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true `
+  -o publish
+Copy-Item native-build\mt5engine-capi.dll publish\mt5engine-capi.dll -Force
+
+# 4. Set env Supabase (User scope) roi chay publish\LatencyArbTool.App.exe
+setx SUPABASE_URL "https://<project>.supabase.co"
+setx SUPABASE_ANON_KEY "eyJ...."
+```

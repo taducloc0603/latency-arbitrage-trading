@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Windows.Threading;
 using LatencyArbTool.App.Services;
 using LatencyArbTool.Core.Models;
@@ -10,66 +11,42 @@ namespace LatencyArbTool.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject, IDisposable
 {
+    private static readonly HttpClient SharedHttp = new();
+
     private readonly SharedMemoryTickReader _reader = new();
     private readonly SharedMemoryTradeReader _tradeReader = new();
-    private readonly SharedMemoryHistoryReader _historyReader = new();
-    private readonly RollingGapStats _stats = new();
-    private readonly LeadFollowSignalEngine _signalEngine = new();
-    private readonly DryRunClusterEngine _clusterEngine = new();
     private readonly Mt5Engine _mt5Engine = new();
     private readonly Mt5TradeExecutor _tradeExecutor;
-    private readonly FeedFreshnessTracker _feedAFreshness = new();
-    private readonly FeedFreshnessTracker _feedBFreshness = new();
-    private readonly SequenceTracker _feedASeq = new();
-    private readonly SequenceTracker _feedBSeq = new();
-    private readonly FillTracker _fillTracker = new();
-    // Pending close tracking: after a close click is sent we wait for the
-    // ticket to leave the trades map. If it lingers past the retry threshold
-    // we re-fire the close to avoid the 89-second "stuck close" outlier that
-    // caused 62% of run 5's loss.
-    private ulong? _pendingCloseTicket;
-    private long? _pendingCloseSentAtTickMs;
-    private int _closeRetryCount;
+    private readonly OpenSignalEngine _signalEngine = new();
+    private readonly TrailingStopEngine _trailingEngine = new();
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
+
+    private StrategyConfig? _config;
     private bool _isRunning;
-    private bool _loggedInvalidLatencyA;
-    private bool _loggedInvalidLatencyB;
-    private bool _loggedBTradeDisconnected;
-    private bool _loggedBHistoryDisconnected;
-private string _chartHwndText = string.Empty;
+
+    private string _chartHwndText = string.Empty;
     private string _tradeHwndText = string.Empty;
-    private string _liveStatus = "Live mode on; waiting for valid HWND";
-    private string _mapNameA = @"Local\MT_A_Tick";
-    private string _mapNameB = @"Local\MT_B_Tick";
+    private string _mapNameA = StrategyConfig.Default.MapA;
+    private string _mapNameB = StrategyConfig.Default.MapB;
+    private string _configStatus = "No config loaded. Click Load Config.";
+    private string _configSummary = "-";
     private string _statusA = "Disconnected";
     private string _statusB = "Disconnected";
     private string _statusBTrade = "Disconnected";
-    private string _statusBHistory = "Disconnected";
     private string _symbolA = "-";
     private string _symbolB = "-";
     private string _bidA = "-";
     private string _askA = "-";
-    private string _spreadA = "-";
-    private string _latencyA = "-";
     private string _bidB = "-";
     private string _askB = "-";
-    private string _spreadB = "-";
-    private string _latencyB = "-";
-    private string _bTradeSummary = "-";
-    private string _bHistorySummary = "-";
     private int _gapBuy;
     private int _gapSell;
-    private int _openBuyThreshold = StrategyDefaults.FixedOpenBuyFallback;
-    private int _openSellThreshold = StrategyDefaults.FixedOpenSellFallback;
-    private int _sampleCount;
-    private string _aVolatility = "-";
-    private string _thresholdMode = "Warmup";
-    private string _botState = LatencyArbTool.Core.Models.BotState.Idle.ToString();
-    private string _clusterSide = "-";
-    private int _orderCount;
-    private string _floatingPnl = "0";
-    private string _peakTrough = "-";
+    private string _positionSide = "Flat";
+    private string _entryPoint = "-";
+    private string _currentPoint = "-";
+    private string _trailingState = "-";
+    private string _liveStatus = "Idle";
 
     public MainViewModel()
     {
@@ -77,58 +54,16 @@ private string _chartHwndText = string.Empty;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
         _timer.Tick += (_, _) => Poll();
 
+        LoadConfigCommand = new RelayCommand(() => _ = LoadConfigAsync(), () => !IsRunning);
         CheckMapsCommand = new RelayCommand(CheckMaps);
-        StartCommand = new RelayCommand(Start, () => !IsRunning);
+        StartCommand = new RelayCommand(Start, () => !IsRunning && _config is not null);
         StopCommand = new RelayCommand(Stop, () => IsRunning);
-        ResetCommand = new RelayCommand(ResetLiveState);
     }
 
-    public string MapNameA
-    {
-        get => _mapNameA;
-        set => SetProperty(ref _mapNameA, value);
-    }
-
-    public string MapNameB
-    {
-        get => _mapNameB;
-        set
-        {
-            if (SetProperty(ref _mapNameB, value))
-            {
-                OnPropertyChanged(nameof(MapNameBTrade));
-                OnPropertyChanged(nameof(MapNameBHistory));
-            }
-        }
-    }
-
-    public string MapNameBTrade => SharedMemoryMapNames.TradeFromTick(MapNameB);
-
-    public string MapNameBHistory => SharedMemoryMapNames.HistoryFromTick(MapNameB);
-
-    public string ChartHwndText
-    {
-        get => _chartHwndText;
-        set
-        {
-            if (SetProperty(ref _chartHwndText, value))
-            {
-                UpdateLiveStatus();
-            }
-        }
-    }
-
-    public string TradeHwndText
-    {
-        get => _tradeHwndText;
-        set
-        {
-            if (SetProperty(ref _tradeHwndText, value))
-            {
-                UpdateLiveStatus();
-            }
-        }
-    }
+    public string MapNameA { get => _mapNameA; set => SetProperty(ref _mapNameA, value); }
+    public string MapNameB { get => _mapNameB; set => SetProperty(ref _mapNameB, value); }
+    public string ChartHwndText { get => _chartHwndText; set => SetProperty(ref _chartHwndText, value); }
+    public string TradeHwndText { get => _tradeHwndText; set => SetProperty(ref _tradeHwndText, value); }
 
     public bool IsRunning
     {
@@ -137,66 +72,106 @@ private string _chartHwndText = string.Empty;
         {
             if (SetProperty(ref _isRunning, value))
             {
+                LoadConfigCommand.RaiseCanExecuteChanged();
                 StartCommand.RaiseCanExecuteChanged();
                 StopCommand.RaiseCanExecuteChanged();
             }
         }
     }
 
+    public string ConfigStatus { get => _configStatus; private set => SetProperty(ref _configStatus, value); }
+    public string ConfigSummary { get => _configSummary; private set => SetProperty(ref _configSummary, value); }
     public string StatusA { get => _statusA; private set => SetProperty(ref _statusA, value); }
     public string StatusB { get => _statusB; private set => SetProperty(ref _statusB, value); }
     public string StatusBTrade { get => _statusBTrade; private set => SetProperty(ref _statusBTrade, value); }
-    public string StatusBHistory { get => _statusBHistory; private set => SetProperty(ref _statusBHistory, value); }
     public string SymbolA { get => _symbolA; private set => SetProperty(ref _symbolA, value); }
     public string SymbolB { get => _symbolB; private set => SetProperty(ref _symbolB, value); }
     public string BidA { get => _bidA; private set => SetProperty(ref _bidA, value); }
     public string AskA { get => _askA; private set => SetProperty(ref _askA, value); }
-    public string SpreadA { get => _spreadA; private set => SetProperty(ref _spreadA, value); }
-    public string LatencyA { get => _latencyA; private set => SetProperty(ref _latencyA, value); }
     public string BidB { get => _bidB; private set => SetProperty(ref _bidB, value); }
     public string AskB { get => _askB; private set => SetProperty(ref _askB, value); }
-    public string SpreadB { get => _spreadB; private set => SetProperty(ref _spreadB, value); }
-    public string LatencyB { get => _latencyB; private set => SetProperty(ref _latencyB, value); }
-    public string BTradeSummary { get => _bTradeSummary; private set => SetProperty(ref _bTradeSummary, value); }
-    public string BHistorySummary { get => _bHistorySummary; private set => SetProperty(ref _bHistorySummary, value); }
     public int GapBuy { get => _gapBuy; private set => SetProperty(ref _gapBuy, value); }
     public int GapSell { get => _gapSell; private set => SetProperty(ref _gapSell, value); }
-    public int OpenBuyThreshold { get => _openBuyThreshold; private set => SetProperty(ref _openBuyThreshold, value); }
-    public int OpenSellThreshold { get => _openSellThreshold; private set => SetProperty(ref _openSellThreshold, value); }
-    public int SampleCount { get => _sampleCount; private set => SetProperty(ref _sampleCount, value); }
-    public string AVolatility { get => _aVolatility; private set => SetProperty(ref _aVolatility, value); }
-    public string ThresholdMode { get => _thresholdMode; private set => SetProperty(ref _thresholdMode, value); }
-    public string BotState { get => _botState; private set => SetProperty(ref _botState, value); }
-    public string ClusterSide { get => _clusterSide; private set => SetProperty(ref _clusterSide, value); }
-    public int OrderCount { get => _orderCount; private set => SetProperty(ref _orderCount, value); }
-    public string FloatingPnl { get => _floatingPnl; private set => SetProperty(ref _floatingPnl, value); }
-    public string PeakTrough { get => _peakTrough; private set => SetProperty(ref _peakTrough, value); }
+    public string PositionSide { get => _positionSide; private set => SetProperty(ref _positionSide, value); }
+    public string EntryPoint { get => _entryPoint; private set => SetProperty(ref _entryPoint, value); }
+    public string CurrentPoint { get => _currentPoint; private set => SetProperty(ref _currentPoint, value); }
+    public string TrailingState { get => _trailingState; private set => SetProperty(ref _trailingState, value); }
     public string LiveStatus { get => _liveStatus; private set => SetProperty(ref _liveStatus, value); }
+
     public ObservableCollection<string> Logs { get; } = [];
+    public RelayCommand LoadConfigCommand { get; }
     public RelayCommand CheckMapsCommand { get; }
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
-    public RelayCommand ResetCommand { get; }
+
+    private async Task LoadConfigAsync()
+    {
+        var hostname = Environment.MachineName;
+        ConfigStatus = $"Loading config for {hostname}...";
+        try
+        {
+            var url = Environment.GetEnvironmentVariable("SUPABASE_URL");
+            var key = Environment.GetEnvironmentVariable("SUPABASE_ANON_KEY");
+            if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(key))
+            {
+                ConfigStatus = "Missing SUPABASE_URL / SUPABASE_ANON_KEY env vars.";
+                AddLog(ConfigStatus);
+                return;
+            }
+
+            var repo = new SupabaseConfigRepository(url, key, SharedHttp);
+            var config = await repo.LoadForHostAsync(hostname).ConfigureAwait(true);
+            if (config is null)
+            {
+                ConfigStatus = $"No active config row for hostname '{hostname}'.";
+                AddLog(ConfigStatus);
+                return;
+            }
+
+            _config = config;
+            MapNameA = config.MapA;
+            MapNameB = config.MapB;
+            ChartHwndText = config.ChartHwndB ?? string.Empty;
+            TradeHwndText = config.TradeHwndB ?? string.Empty;
+            ConfigStatus = $"Loaded '{config.GroupName}' for {hostname}.";
+            ConfigSummary =
+                $"point={config.Point}  x(open)={config.OpenPts}  y(ms)={config.OpenHoldConfirmMs}  z(sustain)={config.OpenConfirmGapPts}  " +
+                $"SL={config.StopLossPoint}  trailStart={config.TrailingStartPoint}  trailStep={config.TrailingStepPoint}";
+            AddLog(ConfigStatus);
+            StartCommand.RaiseCanExecuteChanged();
+        }
+        catch (Exception ex)
+        {
+            ConfigStatus = $"Config load failed: {ex.Message}";
+            AddLog(ConfigStatus);
+        }
+    }
 
     private void CheckMaps()
     {
         StatusA = _reader.MapExists(MapNameA) ? "Connected" : "Disconnected";
         StatusB = _reader.MapExists(MapNameB) ? "Connected" : "Disconnected";
         StatusBTrade = _tradeReader.MapExistsForTickMap(MapNameB) ? "Connected" : "Disconnected";
-        StatusBHistory = _historyReader.MapExistsForTickMap(MapNameB) ? "Connected" : "Disconnected";
-        AddLog($"map check: A={StatusA}, B={StatusB}, BTrade={StatusBTrade}, BHistory={StatusBHistory}");
+        AddLog($"map check: A={StatusA}, B={StatusB}, BTrade={StatusBTrade}");
     }
 
     private void Start()
     {
+        if (_config is null)
+        {
+            AddLog("cannot start: no config loaded");
+            return;
+        }
+
         _csvLogger?.Dispose();
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var logsDirectory = Path.Combine(desktop, "arb-log");
         _csvLogger = new CsvLogger(logsDirectory);
+
+        _signalEngine.Reset();
         IsRunning = true;
         _timer.Start();
-        UpdateLiveStatus();
-        AddLog($"start live mode; logs at {logsDirectory}");
+        AddLog($"start; logs at {logsDirectory}");
     }
 
     private void Stop()
@@ -204,159 +179,59 @@ private string _chartHwndText = string.Empty;
         _timer.Stop();
         _csvLogger?.Flush();
         IsRunning = false;
-        AddLog("stop live mode");
-    }
-
-    private void ResetLiveState()
-    {
-        _signalEngine.Reset();
-        _clusterEngine.Reset();
-        _feedAFreshness.Reset();
-        _feedBFreshness.Reset();
-        _feedASeq.Reset();
-        _feedBSeq.Reset();
-        _fillTracker.Reset();
-        _pendingCloseTicket = null;
-        _pendingCloseSentAtTickMs = null;
-        _closeRetryCount = 0;
-        UpdateClusterUi();
-        AddLog("reset live state");
+        AddLog("stop");
     }
 
     private void Poll()
     {
+        if (_config is not { } config)
+        {
+            return;
+        }
+
         var tickA = _reader.TryRead(MapNameA);
         var tickB = _reader.TryRead(MapNameB);
-        var nowTickCountMs = Environment.TickCount64;
         StatusA = tickA.Success ? "Connected" : $"Disconnected: {tickA.Error}";
         StatusB = tickB.Success ? "Connected" : $"Disconnected: {tickB.Error}";
 
-        // Read trade + history maps every poll (cheap shared-memory read) so
-        // FillTracker can detect new tickets and disappearances at tick resolution.
-        // The previous 1 Hz throttle was for UI update only — moved into Poll.
         var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
-        var bHistory = _historyReader.TryReadForTickMap(MapNameB);
-        UpdateBTradeUi(bTrades, logTransitions: true);
-        UpdateBHistoryUi(bHistory, logTransitions: true);
+        StatusBTrade = bTrades.Success ? $"Connected: {bTrades.Count} open" : $"Disconnected: {bTrades.Error}";
 
         if (tickA.Tick is null || tickB.Tick is null)
         {
             return;
         }
 
+        var a = tickA.Tick;
+        var b = tickB.Tick;
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var (gapBuy, gapSell) = GapCalculator.Calculate(tickA.Tick, tickB.Tick);
-        var feedASilenceMs = _feedAFreshness.Observe(tickA.Tick.EaTickCountMs, nowTickCountMs);
-        var feedBSilenceMs = _feedBFreshness.Observe(tickB.Tick.EaTickCountMs, nowTickCountMs);
-        var feedASeqDelta = _feedASeq.ObserveDelta(tickA.Tick.Count);
-        var feedBSeqDelta = _feedBSeq.ObserveDelta(tickB.Tick.Count);
-        var snapshot = new MarketSnapshot(tickA.Tick, tickB.Tick, nowMs, gapBuy, gapSell, nowTickCountMs, feedASilenceMs, feedBSilenceMs, feedASeqDelta, feedBSeqDelta);
+        var (gapBuy, gapSell) = GapCalculator.Calculate(a, b, config.Point);
 
-        _stats.Add(
-            nowMs,
-            gapBuy,
-            gapSell,
-            tickB.Tick.Spread,
-            midA: (tickA.Tick.Bid + tickA.Tick.Ask) / 2.0,
-            midB: (tickB.Tick.Bid + tickB.Tick.Ask) / 2.0);
-        var rawThresholds = _stats.GetThresholds();
+        // Signal only opens; it is ignored by the engine while a position is held.
+        var signal = _signalEngine.Evaluate(gapBuy, gapSell, nowMs, config);
+        var events = _trailingEngine.Step(b.Bid, b.Ask, signal, nowMs, config);
 
-        // Adaptive bias: shift OpenBuy / OpenSell deeper by the rolling-median
-        // slippage drift, so the bot fires earlier on a high-latency VPS and at
-        // the nominal threshold on a co-located VPS — same code, same config.
-        var driftBias = _fillTracker.OpenFillCount >= StrategyDefaults.SlippageWarmupMinFills
-            ? _fillTracker.MedianDriftMagnitude
-            : StrategyDefaults.SlippageDefaultBiasPts;
-        var thresholds = rawThresholds with
+        UpdateMarketUi(a, b, gapBuy, gapSell, config);
+        _csvLogger?.LogTick(nowMs, a, b, gapBuy, gapSell);
+
+        foreach (var e in events)
         {
-            OpenBuy = rawThresholds.OpenBuy - driftBias,
-            OpenSell = rawThresholds.OpenSell + driftBias,
-        };
+            AddLog($"{e.Decision}: {e.Reason}");
+            _csvLogger?.LogEvent(e);
+            ExecuteLive(e, bTrades);
 
-        var signal = _signalEngine.Evaluate(snapshot, thresholds);
-
-        // Broker live profit on the currently held cluster — fed to the engine
-        // so profit-target / loss-cap closes can fire independent of gap dynamics.
-        double? brokerProfit = bTrades.Success && bTrades.Trades.Count > 0
-            ? bTrades.Trades[0].Profit
-            : null;
-        var events = _clusterEngine.Step(snapshot, thresholds, signal, brokerProfit);
-
-        UpdateMarketUi(snapshot, thresholds);
-        LogInvalidLatencyWarnings(snapshot);
-        UpdateClusterUi();
-        _csvLogger?.LogTick(snapshot, thresholds);
-
-        if (signal is not null
-            || _signalEngine.ExtremeSinceBuyMs is not null
-            || _signalEngine.ExtremeSinceSellMs is not null)
-        {
-            _csvLogger?.LogSignal(nowMs, snapshot, thresholds, _signalEngine, signal);
-        }
-
-        foreach (var dryRunEvent in events)
-        {
-            AddLog($"{dryRunEvent.Decision}: {dryRunEvent.Reason}");
-            _csvLogger?.LogDecision(dryRunEvent, snapshot, thresholds);
-            ExecuteLiveIfEnabled(dryRunEvent, snapshot, bTrades, bHistory);
-        }
-
-        ObserveFills(bTrades, bHistory, snapshot);
-        HandlePendingCloseRetry(bTrades);
-    }
-
-    private void HandlePendingCloseRetry(TradeReadResult bTrades)
-    {
-        if (!_pendingCloseTicket.HasValue || !_pendingCloseSentAtTickMs.HasValue)
-        {
-            return;
-        }
-
-        var ticketStillOpen = bTrades.Success
-            && bTrades.Trades.Any(t => t.Ticket == _pendingCloseTicket.Value);
-
-        if (!ticketStillOpen)
-        {
-            // Broker confirmed the close — clear pending state.
-            if (_closeRetryCount > 0)
+            // A fresh open consumes the signal: reset so re-entry requires a new
+            // confirm window rather than firing every tick the gap stays extreme.
+            if (e.Decision == "live open")
             {
-                AddLog($"close confirmed for ticket {_pendingCloseTicket} after {_closeRetryCount} retr{(_closeRetryCount == 1 ? "y" : "ies")}");
+                _signalEngine.Reset();
             }
-            _pendingCloseTicket = null;
-            _pendingCloseSentAtTickMs = null;
-            _closeRetryCount = 0;
-            return;
         }
-
-        var sinceClickMs = Environment.TickCount64 - _pendingCloseSentAtTickMs.Value;
-        if (sinceClickMs < StrategyDefaults.CloseRetryThresholdMs)
-        {
-            return;
-        }
-
-        if (_closeRetryCount >= StrategyDefaults.CloseRetryMax)
-        {
-            return;
-        }
-
-        var trade = bTrades.Trades.First(t => t.Ticket == _pendingCloseTicket.Value);
-        var side = trade.Side == TradeSide.Buy ? DryRunSide.BuyB : DryRunSide.SellB;
-        var retryEvent = new DryRunEvent(
-            "live close",
-            "close retry",
-            LatencyArbTool.Core.Models.BotState.Holding,
-            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            Side: side);
-
-        var result = _tradeExecutor.Execute(retryEvent, ChartHwndText, TradeHwndText, bTrades);
-        _closeRetryCount++;
-        _pendingCloseSentAtTickMs = Environment.TickCount64;
-        AddLog($"close retry #{_closeRetryCount} for ticket {_pendingCloseTicket} (sat {sinceClickMs}ms): {result.Message}");
     }
 
-    private void ExecuteLiveIfEnabled(DryRunEvent dryRunEvent, MarketSnapshot snapshot, TradeReadResult bTrades, HistoryReadResult bHistory)
+    private void ExecuteLive(DryRunEvent e, TradeReadResult bTrades)
     {
-        var result = _tradeExecutor.Execute(dryRunEvent, ChartHwndText, TradeHwndText, bTrades);
+        var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades);
         if (!result.Attempted)
         {
             return;
@@ -365,162 +240,39 @@ private string _chartHwndText = string.Empty;
         var prefix = result.Success ? "live ok" : "live failed";
         LiveStatus = $"{prefix}: {result.Message}";
         AddLog($"{prefix}: {result.Message}");
-
-        if (result.Success)
-        {
-            AddLog($"live audit: {FormatTradeAudit(bTrades)}; {FormatHistoryAudit(bHistory)}");
-            RecordClickContext(dryRunEvent, snapshot, bTrades);
-        }
-
-        if (dryRunEvent.Decision == "live close")
-        {
-            AddLog("live warning: close maps to MT5 row 0");
-        }
     }
 
-    private void RecordClickContext(DryRunEvent dryRunEvent, MarketSnapshot snapshot, TradeReadResult bTrades)
+    private void UpdateMarketUi(TickRecord a, TickRecord b, int gapBuy, int gapSell, StrategyConfig config)
     {
-        var side = dryRunEvent.Side ?? DryRunSide.BuyB;
-        var decideGap = side == DryRunSide.BuyB ? snapshot.GapBuy : snapshot.GapSell;
-        var decidePrice = dryRunEvent.Decision == "live open" ? dryRunEvent.OpenPrice : dryRunEvent.ClosePrice;
-        var ctx = new ClickContext(
-            DecideTimeMs: snapshot.NowMs,
-            DecideGap: decideGap,
-            DecidePrice: decidePrice,
-            Side: side,
-            ClusterId: dryRunEvent.ClusterId,
-            Decision: dryRunEvent.Decision);
+        SymbolA = a.Symbol;
+        BidA = F(a.Bid);
+        AskA = F(a.Ask);
+        SymbolB = b.Symbol;
+        BidB = F(b.Bid);
+        AskB = F(b.Ask);
+        GapBuy = gapBuy;
+        GapSell = gapSell;
 
-        if (dryRunEvent.Decision == "live open")
+        var pos = _trailingEngine.Current;
+        if (pos is null)
         {
-            _fillTracker.RecordOpenClick(ctx);
-        }
-        else if (dryRunEvent.Decision == "live close" && bTrades.Success && bTrades.Trades.Count > 0)
-        {
-            _fillTracker.RecordCloseClick(bTrades.Trades[0].Ticket, ctx);
-            _pendingCloseTicket = bTrades.Trades[0].Ticket;
-            _pendingCloseSentAtTickMs = Environment.TickCount64;
-            _closeRetryCount = 0;
-        }
-    }
-
-    private void ObserveFills(TradeReadResult bTrades, HistoryReadResult bHistory, MarketSnapshot snapshot)
-    {
-        var fills = _fillTracker.Observe(bTrades, bHistory, snapshot);
-        foreach (var fill in fills)
-        {
-            _csvLogger?.LogFill(fill);
-            var kind = fill.IsClose ? "close" : "open";
-            AddLog($"fill {kind} ticket={fill.Ticket} slippage={fill.SlippageMs}ms gapΔ={fill.DecideGap - fill.FillObservedGap} priceΔ={fill.SlippagePrice:F4}");
-        }
-    }
-
-private void UpdateBTradeUi(TradeReadResult result, bool logTransitions)
-    {
-        StatusBTrade = result.Success ? $"Connected: {result.Count} open" : $"Disconnected: {result.Error}";
-        BTradeSummary = FormatTradeSummary(result);
-
-        if (!logTransitions)
-        {
+            PositionSide = "Flat";
+            EntryPoint = "-";
+            CurrentPoint = "-";
+            TrailingState = "-";
             return;
         }
 
-        if (!result.Success && !_loggedBTradeDisconnected)
-        {
-            AddLog($"B trade map disconnected: map={result.MapName}, error={result.Error}");
-            _loggedBTradeDisconnected = true;
-        }
-        else if (result.Success && _loggedBTradeDisconnected)
-        {
-            AddLog($"B trade map recovered: map={result.MapName}, openTrades={result.Count}");
-            _loggedBTradeDisconnected = false;
-        }
-    }
+        var current = pos.Side == SignalSide.BuyB
+            ? GapCalculator.ToPoints(b.Bid, config.Point)
+            : GapCalculator.ToPoints(b.Ask, config.Point);
 
-    private void UpdateBHistoryUi(HistoryReadResult result, bool logTransitions)
-    {
-        StatusBHistory = result.Success ? $"Connected: {result.Count} history" : $"Disconnected: {result.Error}";
-        BHistorySummary = FormatHistorySummary(result);
-
-        if (!logTransitions)
-        {
-            return;
-        }
-
-        if (!result.Success && !_loggedBHistoryDisconnected)
-        {
-            AddLog($"B history map disconnected: map={result.MapName}, error={result.Error}");
-            _loggedBHistoryDisconnected = true;
-        }
-        else if (result.Success && _loggedBHistoryDisconnected)
-        {
-            AddLog($"B history map recovered: map={result.MapName}, history={result.Count}");
-            _loggedBHistoryDisconnected = false;
-        }
-    }
-
-    private void UpdateMarketUi(MarketSnapshot snapshot, GapThresholds thresholds)
-    {
-        SymbolA = snapshot.A.Symbol;
-        BidA = F(snapshot.A.Bid);
-        AskA = F(snapshot.A.Ask);
-        SpreadA = F(snapshot.A.Spread);
-        LatencyA = FormatLatency(snapshot.FeedALatencyMs);
-
-        SymbolB = snapshot.B.Symbol;
-        BidB = F(snapshot.B.Bid);
-        AskB = F(snapshot.B.Ask);
-        SpreadB = F(snapshot.B.Spread);
-        LatencyB = FormatLatency(snapshot.FeedBLatencyMs);
-
-        GapBuy = snapshot.GapBuy;
-        GapSell = snapshot.GapSell;
-        OpenBuyThreshold = thresholds.OpenBuy;
-        OpenSellThreshold = thresholds.OpenSell;
-        SampleCount = thresholds.SampleCount;
-        AVolatility = thresholds.ARangePoints == int.MaxValue ? "-" : thresholds.ARangePoints.ToString(CultureInfo.InvariantCulture);
-        ThresholdMode = thresholds.IsWarmup ? "Warmup" : "Dynamic";
-    }
-
-    private void UpdateClusterUi()
-    {
-        BotState = _clusterEngine.State.ToString();
-        var cluster = _clusterEngine.CurrentCluster;
-        ClusterSide = cluster?.Side.ToString() ?? "-";
-        OrderCount = cluster?.Orders.Count ?? 0;
-        FloatingPnl = F(cluster?.FloatingPnlRaw ?? 0);
-        PeakTrough = cluster is null ? "-" : $"{F(cluster.PeakAskA)} / {F(cluster.TroughBidA)}";
-    }
-
-    private void LogInvalidLatencyWarnings(MarketSnapshot snapshot)
-    {
-        if (!snapshot.HasValidFeedALatency && !_loggedInvalidLatencyA)
-        {
-            AddLog($"feed A invalid tick latency: eaTickCountMs={snapshot.A.EaTickCountMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedALatencyMs)}, source={snapshot.FeedALatency.Source}");
-            _loggedInvalidLatencyA = true;
-        }
-        else if (snapshot.HasValidFeedALatency)
-        {
-            if (_loggedInvalidLatencyA)
-            {
-                AddLog($"feed A latency recovered: eaTickCountMs={snapshot.A.EaTickCountMs}, tickTimeMsc={snapshot.A.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedALatencyMs)}, source={snapshot.FeedALatency.Source}");
-            }
-            _loggedInvalidLatencyA = false;
-        }
-
-        if (!snapshot.HasValidFeedBLatency && !_loggedInvalidLatencyB)
-        {
-            AddLog($"feed B invalid tick latency: eaTickCountMs={snapshot.B.EaTickCountMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedBLatencyMs)}, source={snapshot.FeedBLatency.Source}");
-            _loggedInvalidLatencyB = true;
-        }
-        else if (snapshot.HasValidFeedBLatency)
-        {
-            if (_loggedInvalidLatencyB)
-            {
-                AddLog($"feed B latency recovered: eaTickCountMs={snapshot.B.EaTickCountMs}, tickTimeMsc={snapshot.B.TickTimeMsc}, latencyResolved={FormatNullableLatency(snapshot.FeedBLatencyMs)}, source={snapshot.FeedBLatency.Source}");
-            }
-            _loggedInvalidLatencyB = false;
-        }
+        PositionSide = pos.Side.ToString();
+        EntryPoint = pos.EntryPoint.ToString(CultureInfo.InvariantCulture);
+        CurrentPoint = current.ToString(CultureInfo.InvariantCulture);
+        TrailingState = pos.TrailingActive
+            ? $"active, ref={(pos.Side == SignalSide.BuyB ? pos.HighestPoint : pos.LowestPoint)}"
+            : $"SL@{(pos.Side == SignalSide.BuyB ? pos.EntryPoint - config.StopLossPoint : pos.EntryPoint + config.StopLossPoint)}";
     }
 
     private void AddLog(string message)
@@ -532,98 +284,7 @@ private void UpdateBTradeUi(TradeReadResult result, bool logTransitions)
         }
     }
 
-    private void UpdateLiveStatus()
-    {
-        var chartOk = HwndParser.TryParse(ChartHwndText, out var chartHwnd, out var chartError);
-        var tradeOk = HwndParser.TryParse(TradeHwndText, out var tradeHwnd, out var tradeError);
-
-        LiveStatus = (chartOk, tradeOk) switch
-        {
-            (true, true) => $"Live armed: chart 0x{chartHwnd:X}, trade 0x{tradeHwnd:X}",
-            (false, true) => $"Live blocked: chart {chartError}",
-            (true, false) => $"Live blocked: trade {tradeError}",
-            _ => $"Live blocked: chart {chartError}; trade {tradeError}"
-        };
-    }
-
-    private static string F(double value)
-    {
-        return value.ToString("0.#####", CultureInfo.InvariantCulture);
-    }
-
-    private static string FormatLatency(long? latencyMs)
-    {
-        return latencyMs is null ? "unknown" : $"{latencyMs.Value} ms";
-    }
-
-    private static string FormatTradeSummary(TradeReadResult result)
-    {
-        if (!result.Success)
-        {
-            return "-";
-        }
-
-        if (result.Count == 0)
-        {
-            return "0 open";
-        }
-
-        var trade = result.Trades[0];
-        return $"{result.Count} open: #{trade.Ticket} {trade.Side} {F(trade.Lot)} pnl={F(trade.Profit)}";
-    }
-
-    private static string FormatHistorySummary(HistoryReadResult result)
-    {
-        if (!result.Success)
-        {
-            return "-";
-        }
-
-        if (result.Count == 0)
-        {
-            return "0 history";
-        }
-
-        var history = result.History[^1];
-        return $"{result.Count} history: #{history.Ticket} {history.Side} pnl={F(history.Profit)}";
-    }
-
-    private static string FormatTradeAudit(TradeReadResult result)
-    {
-        return result.Success ? $"B trades count={result.Count}, first={FormatFirstTrade(result)}" : $"B trades unavailable: {result.Error}";
-    }
-
-    private static string FormatHistoryAudit(HistoryReadResult result)
-    {
-        return result.Success ? $"B history count={result.Count}, last={FormatLastHistory(result)}" : $"B history unavailable: {result.Error}";
-    }
-
-    private static string FormatFirstTrade(TradeReadResult result)
-    {
-        if (result.Count == 0)
-        {
-            return "none";
-        }
-
-        var trade = result.Trades[0];
-        return $"#{trade.Ticket}/{trade.Side}/lot={F(trade.Lot)}/pnl={F(trade.Profit)}";
-    }
-
-    private static string FormatLastHistory(HistoryReadResult result)
-    {
-        if (result.Count == 0)
-        {
-            return "none";
-        }
-
-        var history = result.History[^1];
-        return $"#{history.Ticket}/{history.Side}/pnl={F(history.Profit)}";
-    }
-
-    private static string FormatNullableLatency(long? latencyMs)
-    {
-        return latencyMs?.ToString(CultureInfo.InvariantCulture) ?? "null";
-    }
+    private static string F(double value) => value.ToString("0.#####", CultureInfo.InvariantCulture);
 
     public void Dispose()
     {

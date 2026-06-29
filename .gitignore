@@ -5,4 +5,7 @@ TestResults/
 *.user
 *.suo
 .vs/
+# secrets (Supabase creds read from SUPABASE_URL / SUPABASE_ANON_KEY env vars)
+.env
+appsettings.local.json
 # data
