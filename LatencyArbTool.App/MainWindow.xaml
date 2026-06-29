@@ -35,17 +35,20 @@
                 <TextBlock Text="{Binding ConfigStatus}" FontWeight="SemiBold" />
             </StackPanel>
             <TextBlock Text="{Binding ConfigSummary}" Margin="0,0,0,8" />
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <WrapPanel Margin="0,0,0,8">
                 <TextBlock Text="Map A" Margin="0,0,8,0" />
-                <TextBox Text="{Binding MapNameA, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBox Text="{Binding MapNameA, UpdateSourceTrigger=PropertyChanged}" Width="160" MinWidth="160" />
                 <TextBlock Text="Map B" Margin="0,0,8,0" />
-                <TextBox Text="{Binding MapNameB, UpdateSourceTrigger=PropertyChanged}" />
-            </StackPanel>
-            <StackPanel Orientation="Horizontal">
+                <TextBox Text="{Binding MapNameB, UpdateSourceTrigger=PropertyChanged}" Width="160" MinWidth="160" />
                 <TextBlock Text="Chart HWND B" Margin="0,0,8,0" />
-                <TextBox Text="{Binding ChartHwndText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBox Text="{Binding ChartHwndText, UpdateSourceTrigger=PropertyChanged}" Width="120" MinWidth="120" />
                 <TextBlock Text="Trade HWND B" Margin="0,0,8,0" />
-                <TextBox Text="{Binding TradeHwndText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBox Text="{Binding TradeHwndText, UpdateSourceTrigger=PropertyChanged}" Width="120" MinWidth="120" />
+                <Button Content="Check HWND" Command="{Binding CheckHwndCommand}" />
+            </WrapPanel>
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="HWND: " />
+                <TextBlock Text="{Binding HwndStatus}" FontWeight="SemiBold" Margin="0,0,16,0" />
                 <TextBlock Text="{Binding LiveStatus}" FontWeight="SemiBold" />
             </StackPanel>
         </StackPanel>

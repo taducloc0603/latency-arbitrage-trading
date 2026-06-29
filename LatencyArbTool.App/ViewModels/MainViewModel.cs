@@ -56,6 +56,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _currentPoint = "-";
     private string _trailingState = "-";
     private string _liveStatus = "Idle";
+    private string _hwndStatus = "-";
 
     // Captured at open so the matching close row can log the position's entry context.
     private int? _openGapAtOpen;
@@ -69,6 +70,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         LoadConfigCommand = new RelayCommand(() => _ = LoadConfigAsync(), () => !IsRunning);
         CheckMapsCommand = new RelayCommand(CheckMaps);
+        CheckHwndCommand = new RelayCommand(CheckHwnd);
         StartCommand = new RelayCommand(Start, () => !IsRunning && _config is not null);
         StopCommand = new RelayCommand(Stop, () => IsRunning);
     }
@@ -115,12 +117,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string CurrentPoint { get => _currentPoint; private set => SetProperty(ref _currentPoint, value); }
     public string TrailingState { get => _trailingState; private set => SetProperty(ref _trailingState, value); }
     public string LiveStatus { get => _liveStatus; private set => SetProperty(ref _liveStatus, value); }
+    public string HwndStatus { get => _hwndStatus; private set => SetProperty(ref _hwndStatus, value); }
 
     public ObservableCollection<string> Logs { get; } = [];
     public ObservableCollection<BTradeRow> BTrades { get; } = [];
     public ObservableCollection<BHistoryRow> BHistory { get; } = [];
     public RelayCommand LoadConfigCommand { get; }
     public RelayCommand CheckMapsCommand { get; }
+    public RelayCommand CheckHwndCommand { get; }
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
 
@@ -169,6 +173,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         StatusB = _reader.MapExists(MapNameB) ? "Connected" : "Disconnected";
         StatusBTrade = _tradeReader.MapExistsForTickMap(MapNameB) ? "Connected" : "Disconnected";
         AddLog($"map check: A={StatusA}, B={StatusB}, BTrade={StatusBTrade}");
+    }
+
+    private void CheckHwnd()
+    {
+        var chart = ValidateHwnd(ChartHwndText, "Chart");
+        var trade = ValidateHwnd(TradeHwndText, "Trade");
+        HwndStatus = $"{chart}; {trade}";
+        AddLog($"hwnd check: {HwndStatus}");
+    }
+
+    private string ValidateHwnd(string text, string label)
+    {
+        if (!HwndParser.TryParse(text, out var hwnd, out var parseError))
+        {
+            return $"{label} invalid: {parseError}";
+        }
+
+        return _mt5Engine.IsValidWindow(hwnd, out var error)
+            ? $"{label} 0x{hwnd:X} OK"
+            : $"{label} 0x{hwnd:X} NOT found: {error}";
     }
 
     private void Start()
