@@ -6,18 +6,22 @@ Dong lenh bang Stop-Loss, chuyen sang Trailing-Stop khi da co lai du nguong.
 
 ---
 
-## 1. Cong thuc GAP (don vi point; `point` lay tu config, vd 100)
+## 1. Cong thuc GAP (net, da tru spread B; don vi point; `point` tu config, vd 100)
+
+Gap do theo gia THUC SU giao dich tren B (vao BUY o B.Ask, vao SELL o B.Bid) — tuc
+da tru spread B phai vuot khi vao lenh, de bo edge gia tao do spread:
 
 ```
-GapBuy  = (int)(A.Bid * point) - (int)(B.Bid * point)
-GapSell = (int)(A.Ask * point) - (int)(B.Ask * point)
+GapBuy  = (int)(A.Bid * point) - (int)(B.Ask * point)
+GapSell = (int)(A.Ask * point) - (int)(B.Bid * point)
 ```
 
-- A cao hon B -> `GapBuy > 0`  -> BUY B  (B re, cho B chay len bat kip A).
-- A thap hon B -> `GapSell < 0` -> SELL B (B dat, cho B chay xuong bat kip A).
+- BUY B khi `GapBuy >= x` : `A.Bid - B.Ask >= x` (con >= x room tu gia vao toi A).
+- SELL B khi `GapSell <= -x` : `A.Ask - B.Bid <= -x`  <=>  `B.Bid - A.Ask >= x`.
 
-Vi du (`point = 1`): A=4200, B=4100 -> `GapBuy = 100` -> BUY B.
-A=4100, B=4200 -> `GapSell = -100` -> SELL B.
+Luu y: luc mid A ~ mid B (khong co lech that), spread B rong khien `GapBuy ~ -spreadB/2`
+va `GapSell ~ +spreadB/2` -> ca hai phia deu xa nguong -> KHONG ban tin hieu tren nhieu
+spread. Tin hieu chi ban khi A lech that so voi B vuot qua spread + x.
 
 Code: [GapCalculator.cs](LatencyArbTool.Core/Services/GapCalculator.cs).
 

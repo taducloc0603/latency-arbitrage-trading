@@ -6,43 +6,43 @@ namespace LatencyArbTool.Tests;
 public sealed class GapCalculatorTests
 {
     [Fact]
-    public void Calculate_AAboveB_GivesPositiveBuyGap()
+    public void Calculate_NetBuyRoom_ABidMinusBAsk()
     {
-        // A=4200, B=4100, point=1 -> A-B = +100 -> BUY B
-        var a = Tick(4200, 4200);
-        var b = Tick(4100, 4100);
+        // BUY room = A.Bid - B.Ask (cross B spread to enter at B.Ask).
+        var a = Tick(bid: 100, ask: 101);
+        var b = Tick(bid: 98, ask: 99);
 
         var (gapBuy, gapSell) = GapCalculator.Calculate(a, b, point: 1);
 
-        Assert.Equal(100, gapBuy);
-        Assert.Equal(100, gapSell);
+        Assert.Equal(1, gapBuy);   // A.Bid - B.Ask = 100 - 99
+        Assert.Equal(3, gapSell);  // A.Ask - B.Bid = 101 - 98 (>0 => no sell)
     }
 
     [Fact]
-    public void Calculate_ABelowB_GivesNegativeSellGap()
+    public void Calculate_NetSellRoom_BAboveA_GivesNegativeSellGap()
     {
-        // A=4100, B=4200, point=1 -> A-B = -100 -> SELL B
-        var a = Tick(4100, 4100);
-        var b = Tick(4200, 4200);
+        // B above A -> SELL B. gapSell = A.Ask - B.Bid <= -x  <=>  B.Bid - A.Ask >= x.
+        var a = Tick(bid: 100, ask: 101);
+        var b = Tick(bid: 110, ask: 111);
 
         var (gapBuy, gapSell) = GapCalculator.Calculate(a, b, point: 1);
 
-        Assert.Equal(-100, gapBuy);
-        Assert.Equal(-100, gapSell);
+        Assert.Equal(-11, gapBuy);  // A.Bid - B.Ask = 100 - 111
+        Assert.Equal(-9, gapSell);  // A.Ask - B.Bid = 101 - 110 ; sell room = 9
     }
 
     [Fact]
-    public void Calculate_UsesBidForBuyAskForSell_AndPointMultiplier()
+    public void Calculate_NetGap_SubtractsBSpread_WithPointMultiplier()
     {
         var a = Tick(bid: 100.00, ask: 100.50);
         var b = Tick(bid: 99.90, ask: 100.80);
 
         var (gapBuy, gapSell) = GapCalculator.Calculate(a, b, point: 100);
 
-        // gapBuy  = (int)(100.00*100) - (int)(99.90*100)  = 10000 - 9990  = 10
-        // gapSell = (int)(100.50*100) - (int)(100.80*100) = 10050 - 10080 = -30
-        Assert.Equal(10, gapBuy);
-        Assert.Equal(-30, gapSell);
+        // gapBuy  = (int)(100.00*100) - (int)(100.80*100) = 10000 - 10080 = -80
+        // gapSell = (int)(100.50*100) - (int)(99.90*100)  = 10050 - 9990  = 60
+        Assert.Equal(-80, gapBuy);
+        Assert.Equal(60, gapSell);
     }
 
     [Fact]

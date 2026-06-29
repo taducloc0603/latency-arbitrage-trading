@@ -2,6 +2,9 @@ using LatencyArbTool.Core.Models;
 
 namespace LatencyArbTool.Core.Services;
 
+// Snapshot of the in-progress confirm window for diagnostic logging.
+public readonly record struct WindowSnapshot(string State, long DurationMs, int Min, int Max, int Count);
+
 // Produces an OPEN signal only — never used to close. A signal fires when the
 // gap has continuously held the sustain floor (z = OpenConfirmGapPts) for the
 // confirm window (y = OpenHoldConfirmMs) and the final gap clears the trigger
@@ -28,6 +31,34 @@ public sealed class OpenSignalEngine
     // The confirm-window snapshot of the signal that fired on the most recent
     // Evaluate (null if none fired). Read it before calling Reset().
     public SignalWindow? LastWindow { get; private set; }
+
+    // In-progress confirm window (for periodic snapshot logging). "buy"/"sell"/"idle".
+    public WindowSnapshot CurrentWindow(long nowMs)
+    {
+        if (_buyStartMs is { } bs && _buyGaps.Count > 0)
+        {
+            return Summarize("buy", _buyGaps, bs, nowMs);
+        }
+
+        if (_sellStartMs is { } ss && _sellGaps.Count > 0)
+        {
+            return Summarize("sell", _sellGaps, ss, nowMs);
+        }
+
+        return new WindowSnapshot("idle", 0, 0, 0, 0);
+    }
+
+    private static WindowSnapshot Summarize(string state, List<int> gaps, long startMs, long nowMs)
+    {
+        int min = gaps[0], max = gaps[0];
+        foreach (var g in gaps)
+        {
+            if (g < min) min = g;
+            if (g > max) max = g;
+        }
+
+        return new WindowSnapshot(state, nowMs - startMs, min, max, gaps.Count);
+    }
 
     public void Reset()
     {

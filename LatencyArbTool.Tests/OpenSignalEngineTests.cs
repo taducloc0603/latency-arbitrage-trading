@@ -87,6 +87,27 @@ public sealed class OpenSignalEngineTests
     }
 
     [Fact]
+    public void CurrentWindow_ReportsActiveBuyWindow()
+    {
+        var e = new OpenSignalEngine();
+        var c = Cfg(); // z=50
+
+        Assert.Equal("idle", e.CurrentWindow(0).State);
+
+        e.Evaluate(120, 0, 0, c);   // buy window starts (>= z)
+        e.Evaluate(90, 0, 200, c);
+        var w = e.CurrentWindow(500);
+        Assert.Equal("buy", w.State);
+        Assert.Equal(2, w.Count);
+        Assert.Equal(90, w.Min);
+        Assert.Equal(120, w.Max);
+        Assert.Equal(500, w.DurationMs);
+
+        e.Evaluate(40, 0, 600, c);  // drops below z -> window reset
+        Assert.Equal("idle", e.CurrentWindow(600).State);
+    }
+
+    [Fact]
     public void Reset_ClearsState()
     {
         var e = new OpenSignalEngine();

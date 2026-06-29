@@ -61,6 +61,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     // Captured at open so the matching close row can log the position's entry context.
     private int? _openGapAtOpen;
     private int? _openEntryPoint;
+    private long _lastSnapshotMs;
 
     public MainViewModel()
     {
@@ -210,6 +211,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         _signalEngine.Reset();
         _fillTracker.Reset();
+        _lastSnapshotMs = 0;
         IsRunning = true;
         _timer.Start();
         AddLog($"start; logs at {logsDirectory}");
@@ -265,6 +267,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var events = _trailingEngine.Step(b.Bid, b.Ask, signal, nowMs, config);
 
         UpdateMarketUi(a, b, gapBuy, gapSell, config);
+
+        // ~1s market/gap/window snapshot for offline analysis (logged even when idle).
+        if (nowMs - _lastSnapshotMs >= 1000)
+        {
+            _lastSnapshotMs = nowMs;
+            var w = _signalEngine.CurrentWindow(nowMs);
+            _csvLogger?.LogSnapshot(nowMs, a, b, gapBuy, gapSell, w.State, w.DurationMs, w.Min, w.Max, w.Count);
+        }
 
         foreach (var e in events)
         {

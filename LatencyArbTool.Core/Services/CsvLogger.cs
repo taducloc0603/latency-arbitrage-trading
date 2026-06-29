@@ -11,6 +11,7 @@ public sealed class CsvLogger : IDisposable
 {
     private readonly StreamWriter _events;
     private readonly StreamWriter _fills;
+    private readonly StreamWriter _snapshot;
 
     public CsvLogger(string logsDirectory)
     {
@@ -19,9 +20,23 @@ public sealed class CsvLogger : IDisposable
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         _events = Create(Path.Combine(logsDirectory, $"events_{stamp}.csv"));
         _fills = Create(Path.Combine(logsDirectory, $"fills_{stamp}.csv"));
+        _snapshot = Create(Path.Combine(logsDirectory, $"snapshot_{stamp}.csv"));
 
         _events.WriteLine("timestamp,clusterId,decision,reason,side,entryPoint,openPrice,closePrice,pnlPoints,gapAtOpen,holdMs,trailingActive,windowN,windowMin,windowMax,windowFirst,windowLast,windowAvg,windowDurMs,windowGaps");
         _fills.WriteLine("kind,ticket,clusterId,side,decideTimeMs,fillTimeMs,latencyMs,decideGap,fillObservedGap,decidePrice,fillPrice,slippagePrice,realizedUsd,commission");
+        _snapshot.WriteLine("timestamp,aBid,aAsk,bBid,bAsk,spreadA,spreadB,netGapBuy,netGapSell,winState,winDurMs,winMin,winMax,winN");
+    }
+
+    // Periodic (~1s) market + net-gap + signal-window snapshot for analysis.
+    public void LogSnapshot(long ts, TickRecord a, TickRecord b, int netGapBuy, int netGapSell,
+        string winState, long winDurMs, int winMin, int winMax, int winN)
+    {
+        _snapshot.WriteLine(string.Join(',',
+            ts,
+            F(a.Bid), F(a.Ask), F(b.Bid), F(b.Ask),
+            F(a.Spread), F(b.Spread),
+            netGapBuy, netGapSell,
+            winState, winDurMs, winMin, winMax, winN));
     }
 
     // window is populated only for "live open" rows (the confirm-window snapshot).
@@ -73,12 +88,14 @@ public sealed class CsvLogger : IDisposable
     {
         _events.Flush();
         _fills.Flush();
+        _snapshot.Flush();
     }
 
     public void Dispose()
     {
         _events.Dispose();
         _fills.Dispose();
+        _snapshot.Dispose();
     }
 
     private static StreamWriter Create(string path)
