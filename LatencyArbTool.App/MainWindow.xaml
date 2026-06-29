@@ -62,7 +62,8 @@
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
+                <!-- star so the Event Log (spanning rows 0-1) has a bounded height and scrolls -->
+                <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -100,7 +101,7 @@
                 </UniformGrid>
             </GroupBox>
 
-            <GroupBox Header="Strategy" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,12,12">
+            <GroupBox Header="Strategy" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,12,12" VerticalAlignment="Top">
                 <UniformGrid Columns="4" Margin="12">
                     <TextBlock Text="GapBuy" />
                     <TextBlock Text="{Binding GapBuy}" Style="{StaticResource ValueText}" />
