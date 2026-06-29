@@ -117,7 +117,9 @@
             </GroupBox>
 
             <GroupBox Header="Event Log" Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Margin="0,0,0,12">
-                <ListBox ItemsSource="{Binding Logs}" FontFamily="Consolas" FontSize="12" />
+                <ListBox ItemsSource="{Binding Logs}" FontFamily="Consolas" FontSize="12"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
             </GroupBox>
 
             <TabControl Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3">
