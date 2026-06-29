@@ -427,10 +427,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     Ticket = t.Ticket,
                     Side = t.Side.ToString(),
                     Lot = t.Lot,
-                    OpenPrice = t.Price,
+                    Price = t.Price,
                     StopLoss = t.StopLoss,
                     TakeProfit = t.TakeProfit,
                     Profit = t.Profit,
+                    Time = FormatTime(t.TimeMsc),
+                    OpenEaTimeLocal = t.OpenEaTimeLocal,
+                    Symbol = t.Symbol,
                 });
             }
             else
@@ -456,11 +459,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             BHistory.Add(new BHistoryRow(
                 h.Ticket,
                 h.Side.ToString(),
+                h.Volume,
                 h.OpenPrice,
                 h.ClosePrice,
-                h.Profit,
+                h.StopLoss,
+                h.TakeProfit,
                 h.Commission,
-                FormatTime(h.CloseTimeMsc)));
+                h.Profit,
+                FormatTime(h.OpenTimeMsc),
+                FormatTime(h.CloseTimeMsc),
+                h.CloseEaTimeLocal,
+                h.Symbol));
         }
     }
 

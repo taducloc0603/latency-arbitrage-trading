@@ -128,10 +128,13 @@
                                 <DataGridTextColumn Header="Ticket" Binding="{Binding Ticket}" Width="Auto" />
                                 <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="Auto" />
                                 <DataGridTextColumn Header="Lot" Binding="{Binding Lot, StringFormat=0.##}" Width="Auto" />
-                                <DataGridTextColumn Header="Open" Binding="{Binding OpenPrice, StringFormat=0.#####}" Width="*" />
+                                <DataGridTextColumn Header="Price" Binding="{Binding Price, StringFormat=0.#####}" Width="Auto" />
+                                <DataGridTextColumn Header="SL" Binding="{Binding StopLoss, StringFormat=0.#####}" Width="Auto" />
+                                <DataGridTextColumn Header="TP" Binding="{Binding TakeProfit, StringFormat=0.#####}" Width="Auto" />
                                 <DataGridTextColumn Header="Profit" Binding="{Binding Profit, StringFormat=0.##}" Width="Auto" />
-                                <DataGridTextColumn Header="SL" Binding="{Binding StopLoss, StringFormat=0.#####}" Width="*" />
-                                <DataGridTextColumn Header="TP" Binding="{Binding TakeProfit, StringFormat=0.#####}" Width="*" />
+                                <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="Auto" />
+                                <DataGridTextColumn Header="OpenEaLocal" Binding="{Binding OpenEaTimeLocal}" Width="Auto" />
+                                <DataGridTextColumn Header="Symbol" Binding="{Binding Symbol}" Width="*" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </DockPanel>
@@ -145,11 +148,17 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Ticket" Binding="{Binding Ticket}" Width="Auto" />
                                 <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="Auto" />
-                                <DataGridTextColumn Header="Open" Binding="{Binding OpenPrice, StringFormat=0.#####}" Width="*" />
-                                <DataGridTextColumn Header="Close" Binding="{Binding ClosePrice, StringFormat=0.#####}" Width="*" />
+                                <DataGridTextColumn Header="Volume" Binding="{Binding Volume, StringFormat=0.##}" Width="Auto" />
+                                <DataGridTextColumn Header="OpenPrice" Binding="{Binding OpenPrice, StringFormat=0.#####}" Width="Auto" />
+                                <DataGridTextColumn Header="ClosePrice" Binding="{Binding ClosePrice, StringFormat=0.#####}" Width="Auto" />
+                                <DataGridTextColumn Header="SL" Binding="{Binding StopLoss, StringFormat=0.#####}" Width="Auto" />
+                                <DataGridTextColumn Header="TP" Binding="{Binding TakeProfit, StringFormat=0.#####}" Width="Auto" />
+                                <DataGridTextColumn Header="Commission" Binding="{Binding Commission, StringFormat=0.##}" Width="Auto" />
                                 <DataGridTextColumn Header="Profit" Binding="{Binding Profit, StringFormat=0.##}" Width="Auto" />
-                                <DataGridTextColumn Header="Comm" Binding="{Binding Commission, StringFormat=0.##}" Width="Auto" />
-                                <DataGridTextColumn Header="Close time" Binding="{Binding CloseTime}" Width="*" />
+                                <DataGridTextColumn Header="OpenTime" Binding="{Binding OpenTime}" Width="Auto" />
+                                <DataGridTextColumn Header="CloseTime" Binding="{Binding CloseTime}" Width="Auto" />
+                                <DataGridTextColumn Header="CloseEaLocal" Binding="{Binding CloseEaTimeLocal}" Width="Auto" />
+                                <DataGridTextColumn Header="Symbol" Binding="{Binding Symbol}" Width="*" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </DockPanel>
