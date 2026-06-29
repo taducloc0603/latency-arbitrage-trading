@@ -6,22 +6,23 @@ Dong lenh bang Stop-Loss, chuyen sang Trailing-Stop khi da co lai du nguong.
 
 ---
 
-## 1. Cong thuc GAP (net, da tru spread B; don vi point; `point` tu config, vd 100)
+## 1. Cong thuc GAP (lech mid tru spread B; don vi point; `point` tu config, vd 100)
 
-Gap do theo gia THUC SU giao dich tren B (vao BUY o B.Ask, vao SELL o B.Bid) — tuc
-da tru spread B phai vuot khi vao lenh, de bo edge gia tao do spread:
+Lenh chi mo o B (mot chan): BUY mua B.Ask roi chot B.Bid -> di 1 vong mat tron spread B.
+Loi that khi B catch-up A (mid B -> mid A) = `(midA - midB) - spreadB`. Vi vay gap = lech
+mid da tru spread B; `x` = **loi nhuan that toi thieu sau khi tra spread B**:
 
 ```
-GapBuy  = (int)(A.Bid * point) - (int)(B.Ask * point)
-GapSell = (int)(A.Ask * point) - (int)(B.Bid * point)
+midA = (A.Bid + A.Ask) / 2 ; midB = (B.Bid + B.Ask) / 2 ; spreadB = B.Ask - B.Bid
+D = midA - midB
+GapBuy  = (D - spreadB) * point   -> BUY  khi GapBuy  >= x
+GapSell = (D + spreadB) * point   -> SELL khi GapSell <= -x   (<=> (midB - midA) - spreadB >= x)
 ```
 
-- BUY B khi `GapBuy >= x` : `A.Bid - B.Ask >= x` (con >= x room tu gia vao toi A).
-- SELL B khi `GapSell <= -x` : `A.Ask - B.Bid <= -x`  <=>  `B.Bid - A.Ask >= x`.
-
-Luu y: luc mid A ~ mid B (khong co lech that), spread B rong khien `GapBuy ~ -spreadB/2`
-va `GapSell ~ +spreadB/2` -> ca hai phia deu xa nguong -> KHONG ban tin hieu tren nhieu
-spread. Tin hieu chi ban khi A lech that so voi B vuot qua spread + x.
+Luu y: luc mid A ~ mid B (khong lech that), `GapBuy ~ -spreadB`, `GapSell ~ +spreadB`
+-> ca hai phia deu xa nguong -> KHONG ban tren nhieu spread. Tin hieu chi ban khi A lech
+that so voi B du de con lai >= x sau khi tru spread B. Label UI `GapBuy/GapSell` va cot log
+`gapAtOpen`/`netGap*` mang nghia "edge sau spread".
 
 Code: [GapCalculator.cs](LatencyArbTool.Core/Services/GapCalculator.cs).
 
