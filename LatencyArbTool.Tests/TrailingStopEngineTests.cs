@@ -94,6 +94,34 @@ public sealed class TrailingStopEngineTests
     }
 
     [Fact]
+    public void ApplyOpenFill_ReanchorsEntryForStopLoss()
+    {
+        var e = new TrailingStopEngine();
+        var c = Cfg(); // point=1, SL=50
+
+        Step(e, 1000, SignalSide.BuyB, 0, c);     // decide entry = 1000
+        var id = e.Current!.ClusterId;
+
+        Assert.True(e.ApplyOpenFill(id, 1010, c.Point)); // real fill 1010
+        Assert.Equal(1010, e.Current!.EntryPoint);
+
+        Assert.Null(Step(e, 961, null, 1, c));     // safe vs new SL (1010-50=960)
+        var close = Step(e, 960, null, 2, c);      // hits SL at real entry
+        Assert.Equal("stop loss", close!.Reason);
+    }
+
+    [Fact]
+    public void ApplyOpenFill_WrongCluster_NoChange()
+    {
+        var e = new TrailingStopEngine();
+        var c = Cfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+
+        Assert.False(e.ApplyOpenFill(999, 1010, c.Point));
+        Assert.Equal(1000, e.Current!.EntryPoint);
+    }
+
+    [Fact]
     public void Open_OnlyWhenSignalAndFlat()
     {
         var e = new TrailingStopEngine();

@@ -411,6 +411,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             AddLog(DescribeFill(fill, config.Point));
             _csvLogger?.LogFill(fill);
+
+            // Re-anchor SL/trailing to the broker's real fill price once known.
+            if (!fill.IsClose && fill.ClusterId is { } cid
+                && _trailingEngine.ApplyOpenFill(cid, fill.FillPrice, config.Point))
+            {
+                AddLog($"entry corrected -> {F(fill.FillPrice)} ({GapCalculator.ToPoints(fill.FillPrice, config.Point)}pt)");
+            }
         }
     }
 

@@ -16,6 +16,19 @@ public sealed class TrailingStopEngine
     public Position? Current { get; private set; }
     public bool IsFlat => Current is null;
 
+    // Re-anchor the held position's entry to the broker's actual fill price (known
+    // a few ticks after open). SL / trailing then compute from the real entry.
+    public bool ApplyOpenFill(long clusterId, double fillPrice, int point)
+    {
+        if (Current is { } pos && pos.ClusterId == clusterId)
+        {
+            pos.EntryPoint = GapCalculator.ToPoints(fillPrice, point);
+            return true;
+        }
+
+        return false;
+    }
+
     public List<DryRunEvent> Step(double bidB, double askB, SignalSide? signal, long nowMs, StrategyConfig config)
     {
         var events = new List<DryRunEvent>();
