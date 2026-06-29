@@ -34,10 +34,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _mapNameB = StrategyConfig.Default.MapB;
     private string _configStatus = "No config loaded. Click Load Config.";
     private string _configSummary = "-";
-    private string _statusA = "Disconnected";
-    private string _statusB = "Disconnected";
-    private string _statusBTrade = "Disconnected";
-    private string _statusBHistory = "Disconnected";
+    private string _statusA = "Not started";
+    private string _statusB = "Not started";
+    private string _statusBTrade = "Not started";
+    private string _statusBHistory = "Not started";
     private int _lastHistoryCount = -1;
     private string _symbolA = "-";
     private string _symbolB = "-";
@@ -220,6 +220,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _timer.Stop();
         _csvLogger?.Flush();
         IsRunning = false;
+
+        // Reset to idle so stale Connected/data isn't mistaken for a live state.
+        StatusA = "Not started";
+        StatusB = "Not started";
+        StatusBTrade = "Not started";
+        StatusBHistory = "Not started";
+        BTrades.Clear();
+        BHistory.Clear();
+        _lastHistoryCount = -1;
+
         AddLog("stop");
     }
 
