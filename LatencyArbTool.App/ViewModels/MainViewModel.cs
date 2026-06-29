@@ -115,7 +115,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(key))
             {
                 ConfigStatus = "Missing SUPABASE_URL / SUPABASE_ANON_KEY env vars.";
-                AddLog(ConfigStatus);
                 return;
             }
 
@@ -124,7 +123,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (config is null)
             {
                 ConfigStatus = $"No active config row for hostname '{hostname}'.";
-                AddLog(ConfigStatus);
                 return;
             }
 
@@ -137,13 +135,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             ConfigSummary =
                 $"point={config.Point}  x(open)={config.OpenPts}  y(ms)={config.OpenHoldConfirmMs}  z(sustain)={config.OpenConfirmGapPts}  " +
                 $"SL={config.StopLossPoint}  trailStart={config.TrailingStartPoint}  trailStep={config.TrailingStepPoint}";
-            AddLog(ConfigStatus);
             StartCommand.RaiseCanExecuteChanged();
         }
         catch (Exception ex)
         {
             ConfigStatus = $"Config load failed: {ex.Message}";
-            AddLog(ConfigStatus);
         }
     }
 
