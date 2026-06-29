@@ -43,8 +43,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _symbolB = "-";
     private string _bidA = "-";
     private string _askA = "-";
+    private string _spreadA = "-";
+    private string _latencyA = "-";
     private string _bidB = "-";
     private string _askB = "-";
+    private string _spreadB = "-";
+    private string _latencyB = "-";
     private int _gapBuy;
     private int _gapSell;
     private string _positionSide = "Flat";
@@ -98,8 +102,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string SymbolB { get => _symbolB; private set => SetProperty(ref _symbolB, value); }
     public string BidA { get => _bidA; private set => SetProperty(ref _bidA, value); }
     public string AskA { get => _askA; private set => SetProperty(ref _askA, value); }
+    public string SpreadA { get => _spreadA; private set => SetProperty(ref _spreadA, value); }
+    public string LatencyA { get => _latencyA; private set => SetProperty(ref _latencyA, value); }
     public string BidB { get => _bidB; private set => SetProperty(ref _bidB, value); }
     public string AskB { get => _askB; private set => SetProperty(ref _askB, value); }
+    public string SpreadB { get => _spreadB; private set => SetProperty(ref _spreadB, value); }
+    public string LatencyB { get => _latencyB; private set => SetProperty(ref _latencyB, value); }
     public int GapBuy { get => _gapBuy; private set => SetProperty(ref _gapBuy, value); }
     public int GapSell { get => _gapSell; private set => SetProperty(ref _gapSell, value); }
     public string PositionSide { get => _positionSide; private set => SetProperty(ref _positionSide, value); }
@@ -329,6 +337,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private static string Signed(int value) => value.ToString("+0;-0;0", CultureInfo.InvariantCulture);
 
+    // Display-only latency: the EA stamps ea_ms from Windows GetTickCount64 (same
+    // clock as Environment.TickCount64). Valid range 0..24h, else "unknown". Not
+    // used by the strategy.
+    private static string FormatLatency(long nowTickCountMs, long eaTickCountMs)
+    {
+        var latency = nowTickCountMs - eaTickCountMs;
+        return latency is >= 0 and <= 86_400_000 ? $"{latency} ms" : "unknown";
+    }
+
     private LiveTradeResult ExecuteLive(DryRunEvent e, TradeReadResult bTrades)
     {
         var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades);
@@ -344,12 +361,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateMarketUi(TickRecord a, TickRecord b, int gapBuy, int gapSell, StrategyConfig config)
     {
+        var nowTickCountMs = Environment.TickCount64;
         SymbolA = a.Symbol;
         BidA = F(a.Bid);
         AskA = F(a.Ask);
+        SpreadA = F(a.Spread);
+        LatencyA = FormatLatency(nowTickCountMs, a.EaTickCountMs);
         SymbolB = b.Symbol;
         BidB = F(b.Bid);
         AskB = F(b.Ask);
+        SpreadB = F(b.Spread);
+        LatencyB = FormatLatency(nowTickCountMs, b.EaTickCountMs);
         GapBuy = gapBuy;
         GapSell = gapSell;
 
