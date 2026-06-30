@@ -39,6 +39,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusBTrade = "Not started";
     private string _statusBHistory = "Not started";
     private int _lastHistoryCount = -1;
+    private int _sessionHistoryBaseline = 0;
     private readonly Dictionary<ulong, FillEvent> _openFills = new();
     private readonly Dictionary<ulong, FillEvent> _closeFills = new();
     private string _symbolA = "-";
@@ -270,6 +271,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _lastSnapshotMs = 0;
         IsRunning = true;
         _timer.Start();
+        var initialHistory = _historyReader.TryReadForTickMap(MapNameB);
+        _sessionHistoryBaseline = initialHistory.Success ? initialHistory.Count : 0;
+        _lastHistoryCount = -1;
         AddLog($"start; logs at {logsDirectory}");
     }
 
@@ -310,6 +314,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         BTrades.Clear();
         BHistory.Clear();
         _lastHistoryCount = -1;
+        _sessionHistoryBaseline = 0;
 
         AddLog("stop");
     }
@@ -581,7 +586,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateBHistoryUi(HistoryReadResult r)
     {
-        StatusBHistory = r.Success ? $"Connected: {r.Count} closed" : $"Disconnected: {r.Error}";
+        var sessionCount = r.Success ? r.Count - _sessionHistoryBaseline : 0;
+        StatusBHistory = r.Success ? $"Connected: {sessionCount} session closed" : $"Disconnected: {r.Error}";
         if (!r.Success || r.Count == _lastHistoryCount)
         {
             return;
@@ -589,8 +595,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         _lastHistoryCount = r.Count;
         BHistory.Clear();
-        // Newest first, cap to keep the grid light.
-        foreach (var h in r.History.Reverse().Take(200))
+        // Session records only (from baseline), newest first, cap to keep the grid light.
+        foreach (var h in r.History.Skip(_sessionHistoryBaseline).Reverse().Take(200))
         {
             _openFills.TryGetValue(h.Ticket, out var of);
             _closeFills.TryGetValue(h.Ticket, out var cf);
