@@ -39,6 +39,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusBTrade = "Not started";
     private string _statusBHistory = "Not started";
     private int _lastHistoryCount = -1;
+    private readonly Dictionary<ulong, FillEvent> _openFills = new();
+    private readonly Dictionary<ulong, FillEvent> _closeFills = new();
     private string _symbolA = "-";
     private string _symbolB = "-";
     private string _bidA = "-";
@@ -337,6 +339,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var a = tickA.Tick;
         var b = tickB.Tick;
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var nowTick = Environment.TickCount64;
         var (gapBuy, gapSell) = GapCalculator.Calculate(a, b, config.Point);
 
         // Signal only opens; it is ignored by the engine while a position is held.
@@ -388,12 +391,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 var side = e.Side ?? DryRunSide.BuyB;
                 if (e.Decision == "live open")
                 {
-                    _fillTracker.RecordOpenClick(new ClickContext(nowMs, gapAtOpen, e.OpenPrice, side, e.ClusterId, "live open"));
+                    _fillTracker.RecordOpenClick(new ClickContext(nowMs, nowTick, gapAtOpen, e.OpenPrice, side, e.ClusterId, "live open"));
                 }
                 else if (e.Decision == "live close" && bTrades.Success && bTrades.Trades.Count > 0)
                 {
                     _fillTracker.RecordCloseClick(bTrades.Trades[0].Ticket,
-                        new ClickContext(nowMs, gapAtOpen, e.ClosePrice, side, e.ClusterId, "live close"));
+                        new ClickContext(nowMs, nowTick, gapAtOpen, e.ClosePrice, side, e.ClusterId, "live close"));
                 }
             }
 
@@ -411,6 +414,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             AddLog(DescribeFill(fill, config.Point));
             _csvLogger?.LogFill(fill);
+
+            if (fill.IsClose)
+                _closeFills[fill.Ticket] = fill;
+            else
+                _openFills[fill.Ticket] = fill;
 
             // Re-anchor SL/trailing to the broker's real fill price once known.
             if (!fill.IsClose && fill.ClusterId is { } cid
@@ -584,6 +592,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         // Newest first, cap to keep the grid light.
         foreach (var h in r.History.Reverse().Take(200))
         {
+            _openFills.TryGetValue(h.Ticket, out var of);
+            _closeFills.TryGetValue(h.Ticket, out var cf);
             BHistory.Add(new BHistoryRow(
                 h.Ticket,
                 h.Side.ToString(),
@@ -597,6 +607,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 FormatTime(h.OpenTimeMsc),
                 FormatTime(h.CloseTimeMsc),
                 h.CloseEaTimeLocal,
+                of?.DecideGap,
+                of?.SlippagePrice,
+                cf?.SlippagePrice,
                 h.Symbol));
         }
     }

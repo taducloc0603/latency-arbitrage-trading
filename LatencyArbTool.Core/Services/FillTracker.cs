@@ -139,6 +139,7 @@ public sealed class FillTracker
     private static FillEvent BuildOpenFill(ClickContext ctx, TradeRecord trade, int gapBuy, int gapSell)
     {
         var fillTimeMs = (long)trade.TimeMsc;
+        var fillTickCount = (long)trade.OpenEaTimeLocal;
         var fillObservedGap = ctx.Side == DryRunSide.BuyB ? gapBuy : gapSell;
         return new FillEvent(
             IsClose: false,
@@ -147,7 +148,7 @@ public sealed class FillTracker
             ClusterId: ctx.ClusterId,
             DecideTimeMs: ctx.DecideTimeMs,
             FillTimeMs: fillTimeMs,
-            SlippageMs: fillTimeMs - ctx.DecideTimeMs,
+            SlippageMs: fillTickCount - ctx.DecideTickCount,
             DecideGap: ctx.DecideGap,
             FillObservedGap: fillObservedGap,
             DecidePrice: ctx.DecidePrice,
@@ -158,6 +159,7 @@ public sealed class FillTracker
     private static FillEvent BuildCloseFill(ClickContext ctx, ulong ticket, HistoryRecord? historyRec, int gapBuy, int gapSell)
     {
         var fillTimeMs = historyRec is not null ? (long)historyRec.CloseTimeMsc : 0;
+        var fillTickCount = historyRec is not null ? (long)historyRec.CloseEaTimeLocal : 0;
         var fillPrice = historyRec is not null ? historyRec.ClosePrice : 0;
         var fillObservedGap = ctx.Side == DryRunSide.BuyB ? gapBuy : gapSell;
         return new FillEvent(
@@ -167,7 +169,7 @@ public sealed class FillTracker
             ClusterId: ctx.ClusterId,
             DecideTimeMs: ctx.DecideTimeMs,
             FillTimeMs: fillTimeMs,
-            SlippageMs: fillTimeMs > 0 ? fillTimeMs - ctx.DecideTimeMs : 0,
+            SlippageMs: fillTickCount > 0 ? fillTickCount - ctx.DecideTickCount : 0,
             DecideGap: ctx.DecideGap,
             FillObservedGap: fillObservedGap,
             DecidePrice: ctx.DecidePrice,

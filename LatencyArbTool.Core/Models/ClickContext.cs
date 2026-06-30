@@ -4,6 +4,7 @@ namespace LatencyArbTool.Core.Models;
 // compare against the broker's actual fill price/time and compute slippage.
 public sealed record ClickContext(
     long DecideTimeMs,
+    long DecideTickCount,
     int DecideGap,
     double DecidePrice,
     DryRunSide Side,
