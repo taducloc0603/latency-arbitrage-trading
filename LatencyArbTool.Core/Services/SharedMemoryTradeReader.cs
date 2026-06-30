@@ -100,7 +100,7 @@ public sealed class SharedMemoryTradeReader
 
         var trades = new List<TradeRecord>(count);
         var offset = HeaderSize;
-        for (var i = 0; i < count; i++)
+        for (var i = 0; i < count; i++, offset += RecordSize)
         {
             var ticket = BitConverter.ToUInt64(bytes.Slice(offset, 8));
             var lot = BitConverter.ToDouble(bytes.Slice(offset + 8, 8));
@@ -120,11 +120,10 @@ public sealed class SharedMemoryTradeReader
                 !IsFinite(tp) ||
                 !IsFinite(profit))
             {
-                return TradeReadResult.Fail(mapName, $"invalid trade record {i}");
+                continue;
             }
 
             trades.Add(new TradeRecord(ticket, side, lot, price, sl, tp, profit, timeMsc, openEaTimeLocal, symbol));
-            offset += RecordSize;
         }
 
         return TradeReadResult.Ok(mapName, eaTickCountMs, trades);

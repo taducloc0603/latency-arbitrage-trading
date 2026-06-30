@@ -61,15 +61,15 @@ public sealed class SharedMemoryTradeReaderTests
     }
 
     [Fact]
-    public void Parse_RejectsInvalidPrice()
+    public void Parse_SkipsInvalidPrice()
     {
         var bytes = Header(count: 1, eaMs: 1234);
         WriteTrade(bytes, 16, ticket: 42, TradeSide.Buy, lot: 1, price: -1, profit: 0, symbol: "XAUUSD");
 
         var result = SharedMemoryTradeReader.Parse("Local\\MT_B_Trade", bytes);
 
-        Assert.False(result.Success);
-        Assert.Contains("invalid trade record", result.Error);
+        Assert.True(result.Success);
+        Assert.Empty(result.Trades);
     }
 
     [Fact]

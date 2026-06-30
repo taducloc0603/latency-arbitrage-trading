@@ -90,7 +90,7 @@ public sealed class SharedMemoryHistoryReader
 
         var history = new List<HistoryRecord>(count);
         var offset = HeaderSize;
-        for (var i = 0; i < count; i++)
+        for (var i = 0; i < count; i++, offset += RecordSize)
         {
             var ticket = BitConverter.ToUInt64(bytes.Slice(offset, 8));
             var tradeType = BitConverter.ToInt32(bytes.Slice(offset + 8, 4));
@@ -115,7 +115,7 @@ public sealed class SharedMemoryHistoryReader
                 !IsFinite(commission) ||
                 !IsFinite(profit))
             {
-                return HistoryReadResult.Fail(mapName, $"invalid history record {i}");
+                continue;
             }
 
             history.Add(new HistoryRecord(
@@ -132,7 +132,6 @@ public sealed class SharedMemoryHistoryReader
                 closeTimeMsc,
                 closeEaTimeLocal,
                 symbol));
-            offset += RecordSize;
         }
 
         return HistoryReadResult.Ok(mapName, eaTickCountMs, history);
