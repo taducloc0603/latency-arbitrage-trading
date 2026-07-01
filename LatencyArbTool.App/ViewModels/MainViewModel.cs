@@ -620,7 +620,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 h.Symbol,
                 GapOpen:  openFill is not null ? openFill.DecideGap : null,
                 SlipOpen:  openFill is not null ? GapCalculator.ToPoints(openFill.SlippagePrice, point) : null,
-                SlipClose: closeFill is not null ? GapCalculator.ToPoints(closeFill.SlippagePrice, point) : null));
+                SlipClose: closeFill is not null && h.ClosePrice > 0
+                    ? GapCalculator.ToPoints(h.ClosePrice - closeFill.DecidePrice, point)
+                    : null));
         }
     }
 
