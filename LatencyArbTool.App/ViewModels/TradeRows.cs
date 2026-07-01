@@ -40,5 +40,5 @@ public sealed record BHistoryRow(
     ulong CloseEaTimeLocal,
     string Symbol,
     int? GapOpen,             // gap (pts) at the moment the open click was sent
-    long? SlipOpen,           // ms from open click to broker fill confirmation
-    long? SlipClose);         // ms from close click to broker fill confirmation
+    int? SlipOpen,            // price slippage on open (pts): fill price - decide price
+    int? SlipClose);          // price slippage on close (pts): fill price - decide price

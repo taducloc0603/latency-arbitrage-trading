@@ -337,7 +337,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
         var bHistory = _historyReader.TryReadForTickMap(MapNameB);
         UpdateBTradesUi(bTrades);
-        UpdateBHistoryUi(bHistory);
+        UpdateBHistoryUi(bHistory, config.Point);
 
         if (tickA.Tick is null || tickB.Tick is null)
         {
@@ -587,7 +587,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void UpdateBHistoryUi(HistoryReadResult r)
+    private void UpdateBHistoryUi(HistoryReadResult r, int point)
     {
         var sessionCount = r.Success ? r.Count - _sessionHistoryBaseline : 0;
         StatusBHistory = r.Success ? $"Connected: {sessionCount} session closed" : $"Disconnected: {r.Error}";
@@ -618,9 +618,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 FormatTime(h.CloseTimeMsc),
                 h.CloseEaTimeLocal,
                 h.Symbol,
-                GapOpen: openFill?.DecideGap,
-                SlipOpen: openFill?.SlippageMs,
-                SlipClose: closeFill?.SlippageMs));
+                GapOpen:  openFill is not null ? openFill.DecideGap : null,
+                SlipOpen:  openFill is not null ? GapCalculator.ToPoints(openFill.SlippagePrice, point) : null,
+                SlipClose: closeFill is not null ? GapCalculator.ToPoints(closeFill.SlippagePrice, point) : null));
         }
     }
 

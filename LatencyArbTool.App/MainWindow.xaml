@@ -167,8 +167,8 @@
                                 <DataGridTextColumn Header="CloseEaLocal" Binding="{Binding CloseEaTimeLocal}" Width="Auto" />
                                 <DataGridTextColumn Header="Symbol" Binding="{Binding Symbol}" Width="Auto" />
                                 <DataGridTextColumn Header="GapOpen" Binding="{Binding GapOpen}" Width="Auto" />
-                                <DataGridTextColumn Header="SlipOpen(ms)" Binding="{Binding SlipOpen}" Width="Auto" />
-                                <DataGridTextColumn Header="SlipClose(ms)" Binding="{Binding SlipClose}" Width="*" />
+                                <DataGridTextColumn Header="SlipOpen(pt)" Binding="{Binding SlipOpen}" Width="Auto" />
+                                <DataGridTextColumn Header="SlipClose(pt)" Binding="{Binding SlipClose}" Width="*" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </DockPanel>
