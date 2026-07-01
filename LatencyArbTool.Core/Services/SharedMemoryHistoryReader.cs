@@ -108,7 +108,7 @@ public sealed class SharedMemoryHistoryReader
 
             if (!TryGetSide(tradeType, out var side) ||
                 !IsValidNonNegative(volume) ||
-                !IsValidPositive(openPrice) ||
+                !IsFinite(openPrice) ||
                 !IsValidPositive(closePrice) ||
                 !IsFinite(sl) ||
                 !IsFinite(tp) ||

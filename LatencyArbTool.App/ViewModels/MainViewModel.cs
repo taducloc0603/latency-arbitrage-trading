@@ -22,6 +22,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly OpenSignalEngine _signalEngine = new();
     private readonly TrailingStopEngine _trailingEngine = new();
     private readonly FillTracker _fillTracker = new();
+    private readonly Dictionary<ulong, FillEvent> _openFills = new();
+    private readonly Dictionary<ulong, FillEvent> _closeFills = new();
     private readonly DispatcherTimer _timer;
     private CsvLogger? _csvLogger;
 
@@ -40,8 +42,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusBHistory = "Not started";
     private int _lastHistoryCount = -1;
     private int _sessionHistoryBaseline = 0;
-    private readonly Dictionary<ulong, FillEvent> _openFills = new();
-    private readonly Dictionary<ulong, FillEvent> _closeFills = new();
+
     private string _symbolA = "-";
     private string _symbolB = "-";
     private string _bidA = "-";
@@ -315,6 +316,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         BHistory.Clear();
         _lastHistoryCount = -1;
         _sessionHistoryBaseline = 0;
+        _openFills.Clear();
+        _closeFills.Clear();
 
         AddLog("stop");
     }
@@ -417,13 +420,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         // click) — log/recheck only, never feeds the strategy.
         foreach (var fill in _fillTracker.Observe(bTrades, bHistory, gapBuy, gapSell))
         {
-            AddLog(DescribeFill(fill, config.Point));
-            _csvLogger?.LogFill(fill);
-
             if (fill.IsClose)
                 _closeFills[fill.Ticket] = fill;
             else
                 _openFills[fill.Ticket] = fill;
+
+            AddLog(DescribeFill(fill, config.Point));
+            _csvLogger?.LogFill(fill);
 
             // Re-anchor SL/trailing to the broker's real fill price once known.
             if (!fill.IsClose && fill.ClusterId is { } cid
@@ -598,8 +601,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         // Session records only (from baseline), newest first, cap to keep the grid light.
         foreach (var h in r.History.Skip(_sessionHistoryBaseline).Reverse().Take(200))
         {
-            _openFills.TryGetValue(h.Ticket, out var of);
-            _closeFills.TryGetValue(h.Ticket, out var cf);
+            _openFills.TryGetValue(h.Ticket, out var openFill);
+            _closeFills.TryGetValue(h.Ticket, out var closeFill);
             BHistory.Add(new BHistoryRow(
                 h.Ticket,
                 h.Side.ToString(),
@@ -613,10 +616,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 FormatTime(h.OpenTimeMsc),
                 FormatTime(h.CloseTimeMsc),
                 h.CloseEaTimeLocal,
-                of?.DecideGap,
-                of?.SlippagePrice,
-                cf?.SlippagePrice,
-                h.Symbol));
+                h.Symbol,
+                GapOpen: openFill?.DecideGap,
+                SlipOpen: openFill?.SlippageMs,
+                SlipClose: closeFill?.SlippageMs));
         }
     }
 

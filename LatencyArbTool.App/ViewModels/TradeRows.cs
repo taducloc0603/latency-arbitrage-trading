@@ -38,7 +38,7 @@ public sealed record BHistoryRow(
     string OpenTime,          // from OpenTimeMsc
     string CloseTime,         // from CloseTimeMsc
     ulong CloseEaTimeLocal,
-    int? GapOpen,
-    double? SlipOpen,
-    double? SlipClose,
-    string Symbol);
+    string Symbol,
+    int? GapOpen,             // gap (pts) at the moment the open click was sent
+    long? SlipOpen,           // ms from open click to broker fill confirmation
+    long? SlipClose);         // ms from close click to broker fill confirmation
