@@ -40,7 +40,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusB = "Not started";
     private string _statusBTrade = "Not started";
     private string _statusBHistory = "Not started";
-    private int _lastHistoryCount = -1;
+    private int _lastSessionCount = -1;
     private ulong _sessionStartTimeMsc;
 
     private string _symbolA = "-";
@@ -276,7 +276,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _sessionStartTimeMsc = initialHistory.Success && initialHistory.History.Count > 0
             ? initialHistory.History[^1].CloseTimeMsc
             : 0;
-        _lastHistoryCount = -1;
+        _lastSessionCount = -1;
         AddLog($"start; logs at {logsDirectory}");
     }
 
@@ -316,7 +316,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         StatusBHistory = "Not started";
         BTrades.Clear();
         BHistory.Clear();
-        _lastHistoryCount = -1;
+        _lastSessionCount = -1;
         _sessionStartTimeMsc = 0;
         _openFills.Clear();
         _closeFills.Clear();
@@ -598,12 +598,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             ? r.History.Count(h => h.CloseTimeMsc > _sessionStartTimeMsc)
             : 0;
         StatusBHistory = r.Success ? $"Connected: {sessionCount} session closed" : $"Disconnected: {r.Error}";
-        if (!r.Success || r.Count <= _lastHistoryCount)
+        if (!r.Success || sessionCount == _lastSessionCount)
         {
             return;
         }
 
-        _lastHistoryCount = r.Count;
+        _lastSessionCount = sessionCount;
         BHistory.Clear();
         foreach (var h in r.History
             .Where(h => h.CloseTimeMsc > _sessionStartTimeMsc)
