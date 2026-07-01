@@ -603,11 +603,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             _openFills.TryGetValue(h.Ticket, out var openFill);
             _closeFills.TryGetValue(h.Ticket, out var closeFill);
+            var displayOpenPrice = h.OpenPrice > 0 ? h.OpenPrice : (openFill?.FillPrice ?? 0);
             BHistory.Add(new BHistoryRow(
                 h.Ticket,
                 h.Side.ToString(),
                 h.Volume,
-                h.OpenPrice,
+                displayOpenPrice,
                 h.ClosePrice,
                 h.StopLoss,
                 h.TakeProfit,
