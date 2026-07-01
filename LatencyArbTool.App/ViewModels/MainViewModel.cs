@@ -337,10 +337,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
         var bHistory = _historyReader.TryReadForTickMap(MapNameB);
         UpdateBTradesUi(bTrades);
-        UpdateBHistoryUi(bHistory, config.Point);
 
         if (tickA.Tick is null || tickB.Tick is null)
         {
+            UpdateBHistoryUi(bHistory, config.Point);
             return;
         }
 
@@ -416,8 +416,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        // Observe broker fills every tick (slippage arrives a few ticks after the
-        // click) — log/recheck only, never feeds the strategy.
+        // Observe fills first so _openFills/_closeFills are populated before the
+        // history UI rebuild — ensures SlipClose is available on the same tick the
+        // trade closes and the history count increases.
         foreach (var fill in _fillTracker.Observe(bTrades, bHistory, gapBuy, gapSell))
         {
             if (fill.IsClose)
@@ -435,6 +436,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 AddLog($"entry corrected -> {F(fill.FillPrice)} ({GapCalculator.ToPoints(fill.FillPrice, config.Point)}pt)");
             }
         }
+
+        UpdateBHistoryUi(bHistory, config.Point);
     }
 
     private static string DescribeEvent(DryRunEvent e, int gapBuy, int gapSell, SignalWindow? window)
@@ -591,7 +594,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         var sessionCount = r.Success ? r.Count - _sessionHistoryBaseline : 0;
         StatusBHistory = r.Success ? $"Connected: {sessionCount} session closed" : $"Disconnected: {r.Error}";
-        if (!r.Success || r.Count == _lastHistoryCount)
+        if (!r.Success || r.Count <= _lastHistoryCount)
         {
             return;
         }
