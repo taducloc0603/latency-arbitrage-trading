@@ -23,7 +23,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly OpenSignalEngine _signalEngine = new();
     private readonly TrailingStopEngine _trailingEngine = new();
     private readonly FillTracker _fillTracker = new();
-    private readonly SharedMemoryCommandWriter _commandWriter = new();
     private readonly Dictionary<ulong, FillEvent> _openFills = new();
     private readonly Dictionary<ulong, FillEvent> _closeFills = new();
     private readonly DispatcherTimer _timer;
@@ -42,20 +41,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusB = "Not started";
     private string _statusBTrade = "Not started";
     private string _statusBHistory = "Not started";
-    // Session-closed rows accumulate in BHistory (append-only, keyed by ticket).
-    // The EA re-baselines the history map at Start (reset command below), so the
-    // map only ever contains this session's deals — no time filtering here. We
-    // still accumulate so rows survive being evicted from the bounded map.
+    // B History shows only this session's closes. The bounded history map holds
+    // all deals in the broker's 24h window, so we identify "this session" by
+    // diffing against the tickets already present at Start (_preSessionTickets) —
+    // clock-independent, no EA involvement. _sessionTickets then accumulates the
+    // shown rows append-only so they survive being evicted from the map.
     private readonly HashSet<ulong> _sessionTickets = new();
+    private HashSet<ulong> _preSessionTickets = new();
+    private bool _preSessionPending;
     private const int MaxHistoryRows = 500;
-
-    // History-reset handshake with the EA. Rows are not shown until the EA acks
-    // the reset (so pre-session deals never flash in), with a timeout fallback
-    // in case an old EA build doesn't understand the command.
-    private int _historyResetSeq;
-    private bool _historyResetConfirmed;
-    private long _historyResetSentTick;
-    private const long HistoryResetTimeoutMs = 3000;
 
     private string _symbolA = "-";
     private string _symbolB = "-";
@@ -302,13 +296,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _slSnapshot = null;
         _watchdogClosed = null;
 
-        // Start = a fresh session: drop everything from the previous one and ask
-        // the EA to re-baseline the history map so only new closes are exported.
+        // Start = a fresh session: drop everything from the previous one and
+        // baseline which deals already exist so only new closes are shown.
         BHistory.Clear();
         _sessionTickets.Clear();
         _openFills.Clear();
         _closeFills.Clear();
-        RequestHistoryReset();
+        CapturePreSessionBaseline();
 
         IsRunning = true;
         StartSlWatchdog();
@@ -354,6 +348,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         BTrades.Clear();
         BHistory.Clear();
         _sessionTickets.Clear();
+        _preSessionTickets.Clear();
+        _preSessionPending = false;
         _openFills.Clear();
         _closeFills.Clear();
 
@@ -918,50 +914,23 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    // Asks the EA to re-baseline the history map to now (new session). Until the
-    // EA acks, the grid is held empty so pre-session deals never flash in.
-    private void RequestHistoryReset()
+    // Snapshots the deals already in the history map at Start so only closes
+    // appearing afterwards count as "this session". If the map can't be read yet
+    // the snapshot is deferred to the first successful read (see UpdateBHistoryUi)
+    // so pre-session deals are never shown by an empty baseline.
+    private void CapturePreSessionBaseline()
     {
-        _historyResetConfirmed = false;
-        _historyResetSentTick = Environment.TickCount64;
-        var mapName = SharedMemoryMapNames.CmdFromTick(MapNameB);
-        if (_commandWriter.TryWriteResetHistory(mapName, out var seq, out var error))
+        var h = _historyReader.TryReadForTickMap(MapNameB);
+        if (h.Success)
         {
-            _historyResetSeq = seq;
+            _preSessionTickets = new HashSet<ulong>(h.History.Select(x => x.Ticket));
+            _preSessionPending = false;
         }
         else
         {
-            // No command channel (EA not running / old build): fall back to
-            // showing everything rather than a permanently empty grid.
-            _historyResetSeq = 0;
-            _historyResetConfirmed = true;
-            AddLog($"history reset request failed: {error} — showing all deals in map");
+            _preSessionTickets = new HashSet<ulong>();
+            _preSessionPending = true;
         }
-    }
-
-    // True once the EA has re-baselined the map (or the timeout fallback fired).
-    private bool HistoryResetReady()
-    {
-        if (_historyResetConfirmed)
-        {
-            return true;
-        }
-
-        var ack = _commandWriter.TryReadAck(SharedMemoryMapNames.CmdFromTick(MapNameB));
-        if (ack is { } a && a.Seq == _historyResetSeq)
-        {
-            _historyResetConfirmed = true;
-            return true;
-        }
-
-        if (Environment.TickCount64 - _historyResetSentTick > HistoryResetTimeoutMs)
-        {
-            _historyResetConfirmed = true;
-            AddLog("history reset not acknowledged — recompile/re-attach EA DataExporter");
-            return true;
-        }
-
-        return false;
     }
 
     private void UpdateBHistoryUi(HistoryReadResult r, int point)
@@ -972,19 +941,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Hold the grid empty until the EA confirms the session reset so the map
-        // (which still holds old deals for a tick or two) doesn't pollute it.
-        if (!HistoryResetReady())
+        // Map wasn't readable at Start: take the baseline now (don't show the
+        // deals that were already there before this session).
+        if (_preSessionPending)
         {
-            StatusBHistory = "Connected: resetting session…";
-            return;
+            _preSessionTickets = new HashSet<ulong>(r.History.Select(x => x.Ticket));
+            _preSessionPending = false;
         }
 
-        // The map is session-only after the EA reset; add each ticket once. Rows
-        // stay even after the record is evicted from the bounded map.
+        // Show each ticket that closed this session exactly once; rows stay even
+        // after the record is evicted from the bounded map.
         foreach (var h in r.History) // oldest-first, so inserts keep newest on top
         {
-            if (!_sessionTickets.Add(h.Ticket))
+            if (_preSessionTickets.Contains(h.Ticket) || !_sessionTickets.Add(h.Ticket))
             {
                 continue;
             }

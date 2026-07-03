@@ -6,12 +6,10 @@
 #include "TradesMemory.mqh"
 #include "HistoryMemory.mqh"
 #include "TickMemory.mqh"
-#include "CommandMemory.mqh"
 
 CTradesMemory* g_trades = NULL;
 CHistoryMemory* g_history = NULL;
 CTickMemory* g_tick = NULL;
-CCommandMemory* g_commands = NULL;
 
 // Update định kỳ để map không bị stale khi miss event OnTrade
 // (và để Profit của trades chạy theo giá).
@@ -26,7 +24,6 @@ input int UPDATE_INTERVAL_MS = 1;  // cập nhật mỗi 1ms (1000 = 1s)
 string TRADES_MEMORY_NAME = StringFormat("Local\\MT_%s_Trades", EA_CHANNEL_ID);
 string HISTORY_MEMORY_NAME = StringFormat("Local\\MT_%s_History", EA_CHANNEL_ID);
 string TICK_MEMORY_NAME = StringFormat("Local\\MT_%s_Tick", EA_CHANNEL_ID);
-string COMMAND_MEMORY_NAME = StringFormat("Local\\MT_%s_Cmd", EA_CHANNEL_ID);
 
 int OnInit() {
 
@@ -54,17 +51,6 @@ int OnInit() {
       return INIT_FAILED;
    }
 
-   g_commands = new CCommandMemory(COMMAND_MEMORY_NAME);
-   if(!g_commands.Init()) {
-      Print(StringFormat("[X] Tạo Command memory thất bại: %s ", COMMAND_MEMORY_NAME));
-      delete g_trades;
-      delete g_history;
-      delete g_tick;
-      delete g_commands;
-      return INIT_FAILED;
-   }
-   g_commands.SeedFromExisting();
-
    g_trades.Update();
    g_history.Update();
    
@@ -83,8 +69,6 @@ void OnTrade() {
 }
 
 void OnTimer() {
-   g_commands.Process(g_history);
-
    ulong now = GetTickCount64();
    if(now - g_lastTradesRefreshMs >= TRADES_REFRESH_MS) {
       g_lastTradesRefreshMs = now;
@@ -102,7 +86,6 @@ void OnDeinit(const int reason) {
    if(g_trades) delete g_trades;
    if(g_history) delete g_history;
    if(g_tick) delete g_tick;
-   if(g_commands) delete g_commands;
 
    Print("[OK] Dọn dẹp xong.");
 }
