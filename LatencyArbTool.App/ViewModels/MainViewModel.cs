@@ -23,6 +23,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly OpenSignalEngine _signalEngine = new();
     private readonly TrailingStopEngine _trailingEngine = new();
     private readonly FillTracker _fillTracker = new();
+    private readonly SharedMemoryControlWriter _controlWriter = new();
     private readonly Dictionary<ulong, FillEvent> _openFills = new();
     private readonly Dictionary<ulong, FillEvent> _closeFills = new();
     private readonly DispatcherTimer _timer;
@@ -303,6 +304,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _openFills.Clear();
         _closeFills.Clear();
         CapturePreSessionBaseline();
+        RequestHistoryMapReset();
 
         IsRunning = true;
         StartSlWatchdog();
@@ -931,6 +933,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _preSessionTickets = new HashSet<ulong>();
             _preSessionPending = true;
         }
+    }
+
+    // Signals the EA to re-baseline the history map so it physically holds only
+    // this session's deals. The C# pre-session filter above is the fallback: it
+    // keeps the display clean during the ~ms before the EA clears, and when the
+    // EA is an old build without the control map.
+    private void RequestHistoryMapReset()
+    {
+        var mapName = SharedMemoryMapNames.CtrlFromTick(MapNameB);
+        AddLog(_controlWriter.TryBumpResetSeq(mapName, out var error)
+            ? "history map reset requested"
+            : $"history map reset unavailable ({error}) — dùng lọc hiển thị ở app");
     }
 
     private void UpdateBHistoryUi(HistoryReadResult r, int point)

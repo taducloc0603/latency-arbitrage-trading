@@ -6,10 +6,12 @@
 #include "TradesMemory.mqh"
 #include "HistoryMemory.mqh"
 #include "TickMemory.mqh"
+#include "ControlMemory.mqh"
 
 CTradesMemory* g_trades = NULL;
 CHistoryMemory* g_history = NULL;
 CTickMemory* g_tick = NULL;
+CControlMemory* g_ctrl = NULL;
 
 // Update định kỳ để map không bị stale khi miss event OnTrade
 // (và để Profit của trades chạy theo giá).
@@ -24,6 +26,7 @@ input int UPDATE_INTERVAL_MS = 1;  // cập nhật mỗi 1ms (1000 = 1s)
 string TRADES_MEMORY_NAME = StringFormat("Local\\MT_%s_Trades", EA_CHANNEL_ID);
 string HISTORY_MEMORY_NAME = StringFormat("Local\\MT_%s_History", EA_CHANNEL_ID);
 string TICK_MEMORY_NAME = StringFormat("Local\\MT_%s_Tick", EA_CHANNEL_ID);
+string CONTROL_MEMORY_NAME = StringFormat("Local\\MT_%s_Ctrl", EA_CHANNEL_ID);
 
 int OnInit() {
 
@@ -51,6 +54,17 @@ int OnInit() {
       return INIT_FAILED;
    }
 
+   g_ctrl = new CControlMemory(CONTROL_MEMORY_NAME);
+   if(!g_ctrl.Init()) {
+      Print(StringFormat("[X] Tạo Control memory thất bại: %s ", CONTROL_MEMORY_NAME));
+      delete g_trades;
+      delete g_history;
+      delete g_tick;
+      delete g_ctrl;
+      return INIT_FAILED;
+   }
+   g_ctrl.Seed();
+
    g_trades.Update();
    g_history.Update();
    
@@ -69,6 +83,9 @@ void OnTrade() {
 }
 
 void OnTimer() {
+   // App nhấn Start -> re-baseline history để map chỉ còn deal của phiên mới.
+   if(g_ctrl.ResetRequested()) g_history.ResetSession();
+
    ulong now = GetTickCount64();
    if(now - g_lastTradesRefreshMs >= TRADES_REFRESH_MS) {
       g_lastTradesRefreshMs = now;
@@ -86,6 +103,7 @@ void OnDeinit(const int reason) {
    if(g_trades) delete g_trades;
    if(g_history) delete g_history;
    if(g_tick) delete g_tick;
+   if(g_ctrl) delete g_ctrl;
 
    Print("[OK] Dọn dẹp xong.");
 }
