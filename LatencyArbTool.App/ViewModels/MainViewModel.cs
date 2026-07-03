@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Windows.Threading;
 using LatencyArbTool.App.Services;
 using LatencyArbTool.Core.Models;
@@ -84,15 +85,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     // instantly re-entering the same adverse condition).
     private long _reopenBlockedUntilMs;
 
-    // Broker-side trailing hard SL: the app re-pushes the SL to the broker (via
-    // the EA) as the soft stop ratchets up, so the broker enforces it tick-by-tick.
-    private int _lastSlCmdSeq;
-    private int _lastAckedSlSeq;
-    private bool _brokerSlArmed;
-    private int? _lastPushedSoftStopPoint;
-    // Only re-push once the soft stop has tightened by at least this much (bounds
-    // how often we send PositionModify to the broker).
-    private const int BrokerSlTrailStepPt = 10;
+    // Tool-layer gap guard: a background watchdog reads tick B far faster than
+    // the 25ms UI poll and closes the instant price crosses the stop. The UI poll
+    // publishes the current stop as an immutable snapshot; the watchdog only reads
+    // it + shared memory and never touches engine state (see SlWatchdogLoop).
+    private readonly object _nativeTradeLock = new();
+    private volatile SlSnapshot? _slSnapshot;
+    private volatile WatchdogClose? _watchdogClosed;
+    private Thread? _slWatchdog;
+    private volatile bool _slWatchdogRunning;
 
     public MainViewModel()
     {
@@ -298,10 +299,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _fillTracker.Reset();
         _lastSnapshotMs = 0;
         _reopenBlockedUntilMs = 0;
-        _lastSlCmdSeq = 0;
-        _lastAckedSlSeq = 0;
-        _brokerSlArmed = false;
-        _lastPushedSoftStopPoint = null;
+        _slSnapshot = null;
+        _watchdogClosed = null;
 
         // Start = a fresh session: drop everything from the previous one and ask
         // the EA to re-baseline the history map so only new closes are exported.
@@ -312,6 +311,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RequestHistoryReset();
 
         IsRunning = true;
+        StartSlWatchdog();
         _timer.Start();
         AddLog($"start; logs at {logsDirectory}");
     }
@@ -342,6 +342,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void Stop()
     {
         _timer.Stop();
+        StopSlWatchdog();
         _csvLogger?.Flush();
         IsRunning = false;
 
@@ -365,6 +366,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        ConsumeWatchdogClose(config);
 
         var tickA = _reader.TryRead(MapNameA);
         var tickB = _reader.TryRead(MapNameB);
@@ -508,12 +511,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        UpdateTrailingBrokerSl(config);
         ReconcileExternalClose(bTrades, b.Symbol, nowMs, config);
-        PollHardSlAck();
+        PublishSlSnapshot(b.Symbol, config);
 
         UpdateBHistoryUi(bHistory, config.Point);
     }
+
+    // Publishes the current stop as an immutable snapshot for the watchdog to
+    // enforce between UI polls (null when flat or the fill/ticket isn't known yet).
+    private void PublishSlSnapshot(string symbol, StrategyConfig config)
+    {
+        if (_trailingEngine.Current is { Ticket: { } ticket } pos
+            && _trailingEngine.CurrentStopLevelPoint(config) is { } stopPoint)
+        {
+            _slSnapshot = new SlSnapshot(ticket, ToDrySide(pos.Side), stopPoint / (double)config.Point, symbol);
+        }
+        else
+        {
+            _slSnapshot = null;
+        }
+    }
+
+    private static DryRunSide ToDrySide(SignalSide side) =>
+        side == SignalSide.BuyB ? DryRunSide.BuyB : DryRunSide.SellB;
 
     // Suppresses an open signal when a feed is stale or the post-close cooldown
     // is active. Also resets the confirm window so the signal must be re-earned
@@ -613,79 +633,104 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _openEntryPoint = null;
     }
 
-    // Broker-side trailing hard SL. The broker checks SL on every tick server-side,
-    // so pushing the SL down as the soft stop ratchets up catches a price gap the
-    // instant it crosses — far earlier than the 25ms app poll + click. The broker
-    // SL sits HardSlBufferPt beyond the app's soft stop, so the app still closes
-    // first on normal moves and the broker only fires on gaps that blow past.
-    private void UpdateTrailingBrokerSl(StrategyConfig config)
+    // Applies a close performed by the background watchdog to the engine: it ran
+    // on another thread so the reconciliation (go flat, log, cooldown) happens
+    // here on the UI thread where engine/UI state is owned.
+    private void ConsumeWatchdogClose(StrategyConfig config)
     {
-        if (config.HardSlBufferPt <= 0)
-        {
-            return; // hard SL disabled
-        }
-
-        if (_trailingEngine.Current is not { Ticket: { } ticket } pos)
-        {
-            // Flat / fill not observed yet: reset so the next position re-arms.
-            _lastPushedSoftStopPoint = null;
-            _brokerSlArmed = false;
-            return;
-        }
-
-        if (_trailingEngine.CurrentStopLevelPoint(config) is not { } softStopPoint)
+        if (_watchdogClosed is not { } wc)
         {
             return;
         }
 
-        // Only re-push once the stop tightened by a meaningful step (bounds the
-        // PositionModify rate). Stop only ratchets in the protective direction.
-        if (_lastPushedSoftStopPoint is { } last && Math.Abs(softStopPoint - last) < BrokerSlTrailStepPt)
+        _watchdogClosed = null;
+        if (_trailingEngine.Current is not { } pos || pos.Ticket != wc.Ticket)
         {
-            return;
+            return; // already reconciled by the normal path
         }
 
-        var brokerStopPoint = pos.Side == SignalSide.BuyB
-            ? softStopPoint - config.HardSlBufferPt
-            : softStopPoint + config.HardSlBufferPt;
-        var slPrice = brokerStopPoint / (double)config.Point;
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        AddLog($"SL watchdog closed {wc.Side} #{wc.Ticket} exit={F(wc.Price)} stop={F(wc.Stop)} (gap guard)");
+        _trailingEngine.ConfirmClose(pos.ClusterId);
+        BeginReopenCooldown(nowMs, config);
+        _openGapAtOpen = null;
+        _openEntryPoint = null;
+    }
 
-        if (_commandWriter.TryWriteSetSl(SharedMemoryMapNames.CmdFromTick(MapNameB), ticket, slPrice, out var seq, out var error))
+    // Background gap guard. Reads tick B far faster than the 25ms UI poll and, the
+    // instant the close-side price crosses the published stop, closes the position
+    // by ticket. Touches only shared memory + the immutable snapshot — never engine
+    // state — so the UI thread stays the sole owner of strategy state. Native close
+    // is serialized with the UI thread via _nativeTradeLock.
+    private void SlWatchdogLoop()
+    {
+        while (_slWatchdogRunning)
         {
-            _lastPushedSoftStopPoint = softStopPoint;
-            _lastSlCmdSeq = seq;
-            if (!_brokerSlArmed)
+            try
             {
-                AddLog($"hard SL trailing armed #{ticket} sl={F(slPrice)} (soft stop {softStopPoint}pt − {config.HardSlBufferPt}pt buffer)");
-                _brokerSlArmed = true;
+                var snap = _slSnapshot;
+                if (snap is null)
+                {
+                    Thread.Sleep(1);
+                    continue;
+                }
+
+                var tick = _reader.TryRead(MapNameB);
+                if (tick.Tick is not { } b)
+                {
+                    Thread.Sleep(1);
+                    continue;
+                }
+
+                var closePrice = snap.Side == DryRunSide.BuyB ? b.Bid : b.Ask;
+                var crossed = snap.Side == DryRunSide.BuyB
+                    ? closePrice <= snap.StopPrice
+                    : closePrice >= snap.StopPrice;
+                if (!crossed)
+                {
+                    Thread.Sleep(1);
+                    continue;
+                }
+
+                // Stop firing on this snapshot before the close so we don't loop.
+                _slSnapshot = null;
+
+                var bTrades = _tradeReader.TryReadForTickMap(MapNameB);
+                var closeEvent = new DryRunEvent("live close", "gap guard", BotState.Idle, 0, Side: snap.Side);
+                LiveTradeResult result;
+                lock (_nativeTradeLock)
+                {
+                    result = _tradeExecutor.Execute(closeEvent, ChartHwndText, TradeHwndText, bTrades, snap.Ticket, snap.Symbol);
+                }
+
+                if (result.Success)
+                {
+                    _watchdogClosed = new WatchdogClose(snap.Ticket, closePrice, snap.StopPrice, snap.Side);
+                }
+                // On failure the UI poll's soft close + retry still cover it; the
+                // snapshot re-publishes next poll if the position is still open.
             }
-        }
-        else
-        {
-            AddLog($"hard SL push failed #{ticket}: {error}");
+            catch
+            {
+                // A transient read/close error must not kill the guard thread.
+            }
         }
     }
 
-    // Surfaces broker rejections (e.g. AutoTrading off, SL inside the stops
-    // level) once per command; successful sets are silent to avoid log spam.
-    private void PollHardSlAck()
+    private void StartSlWatchdog()
     {
-        if (_lastSlCmdSeq == 0 || _lastSlCmdSeq == _lastAckedSlSeq)
-        {
-            return;
-        }
+        StopSlWatchdog();
+        _slWatchdogRunning = true;
+        _slWatchdog = new Thread(SlWatchdogLoop) { IsBackground = true, Name = "SlWatchdog" };
+        _slWatchdog.Start();
+    }
 
-        var ack = _commandWriter.TryReadAck(SharedMemoryMapNames.CmdFromTick(MapNameB));
-        if (ack is not { } a || a.Seq != _lastSlCmdSeq)
-        {
-            return;
-        }
-
-        _lastAckedSlSeq = a.Seq;
-        if (!a.Ok)
-        {
-            AddLog($"hard SL rejected by broker (retcode={a.Retcode}) — check AutoTrading / broker stops level");
-        }
+    private void StopSlWatchdog()
+    {
+        _slWatchdogRunning = false;
+        _slWatchdog?.Join(500);
+        _slWatchdog = null;
+        _slSnapshot = null;
     }
 
     private static ulong FindSymbolTicket(TradeReadResult bTrades, string symbol)
@@ -762,7 +807,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private LiveTradeResult ExecuteLive(DryRunEvent e, TradeReadResult bTrades, ulong? closeTicket, string symbol)
     {
-        var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades, closeTicket, symbol);
+        // Serialize native trade actions with the background SL watchdog, which
+        // also closes via the native context.
+        LiveTradeResult result;
+        lock (_nativeTradeLock)
+        {
+            result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades, closeTicket, symbol);
+        }
+
         if (result.Attempted)
         {
             var prefix = result.Success ? "live ok" : "live failed";
@@ -1037,7 +1089,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _timer.Stop();
+        StopSlWatchdog();
         _csvLogger?.Dispose();
         _mt5Engine.Dispose();
     }
 }
+
+// Immutable stop snapshot the UI thread publishes for the background SL watchdog.
+public sealed record SlSnapshot(ulong Ticket, DryRunSide Side, double StopPrice, string Symbol);
+
+// A close performed by the watchdog, handed back to the UI thread to reconcile.
+public sealed record WatchdogClose(ulong Ticket, double Price, double Stop, DryRunSide Side);

@@ -91,14 +91,15 @@ Diem mau chot: sau khi len 1040 roi quay dau, stop la **Max-80 = 960** (KHONG ph
 
 PnL khi dong (point): `BUY = Current - Entry`, `SELL = Entry - Current`.
 
-> **Hard SL broker-side (TRAILING).** App day SL that xuong broker (qua EA
-> `PositionModify`) va **cap nhat lien tuc khi soft-stop truot len**. Broker kiem
-> SL tren TUNG tick server-side nen chan duoc buoc nhay gia (gap) giua 2 lan app
-> poll. Muc: `broker_SL = soft_stop ∓ hard_sl_buffer_pt` (BUY tru, SELL cong) —
-> nam sau soft-stop dung `hard_sl_buffer_pt` diem, nen app van dong truoc trong
-> nhip thuong, broker chi bat cac gap vuot qua. **Giam `hard_sl_buffer_pt` de siet
-> gap sat hon** (0 = broker trung soft-stop). Chi day lai khi stop siet >= 10pt de
-> gioi han so lan modify. Yeu cau EA bat AutoTrading.
+> **Gap guard (tang tool, KHONG qua EA).** Ngoai vong poll UI 25ms, mot **watchdog
+> chay nen** doc tick B lien tuc (~1ms) va DONG NGAY khi gia dong vuot soft-stop
+> (`CurrentStopLevelPoint`), thay vi cho vong poll ke tiep. Muc dich: bat buoc nhay
+> gia (gap) giua 2 lan poll som nhat co the ma khong can dat SL o broker.
+> Watchdog chi doc shared memory + snapshot bat bien do UI thread publish (KHONG
+> cham state engine); dong theo dung ticket, native close nam trong `_nativeTradeLock`
+> chung voi UI thread. Han che: day KHONG phai SL server-side — mot gap 1 tick van
+> co the da vuot moc tai chinh tick watchdog nhin thay, cong do tre native click.
+> (`hard_sl_buffer_pt` khong con duoc dung o ban tang-tool nay.)
 
 ---
 
