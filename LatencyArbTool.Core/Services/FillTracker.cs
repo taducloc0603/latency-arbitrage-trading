@@ -8,11 +8,20 @@ namespace LatencyArbTool.Core.Services;
 // bot captures the ticket at click time, then we wait for it to disappear from
 // the trades map and read the close price / realized profit from the history map.
 //
+// The history map often lags the trades map by a few polls, so a disappeared
+// ticket waits up to HistoryGraceMs for its history record before we give up
+// and emit a zero-priced close. Pending open contexts expire after OpenTtlMs so
+// a click that never produced a ticket cannot poison a much later match.
+//
 // Logging / recheck only — it does NOT feed back into thresholds.
 public sealed class FillTracker
 {
+    private const long HistoryGraceMs = 5_000;
+    private const long OpenTtlMs = 120_000;
+
     private readonly Queue<ClickContext> _pendingOpens = new();
     private readonly Dictionary<ulong, ClickContext> _pendingCloses = new();
+    private readonly Dictionary<ulong, (ClickContext Context, long DeadlineMs)> _awaitingHistory = new();
     private HashSet<ulong> _knownTickets = new();
     private bool _initialized;
 
@@ -20,13 +29,15 @@ public sealed class FillTracker
 
     public void RecordCloseClick(ulong ticket, ClickContext context) => _pendingCloses[ticket] = context;
 
-    public IReadOnlyList<FillEvent> Observe(TradeReadResult trades, HistoryReadResult history, int gapBuy, int gapSell)
+    public IReadOnlyList<FillEvent> Observe(TradeReadResult trades, HistoryReadResult history, int gapBuy, int gapSell, long nowMs)
     {
         var events = new List<FillEvent>();
         if (!trades.Success)
         {
             return events;
         }
+
+        ExpireStaleOpens(nowMs);
 
         var current = new HashSet<ulong>();
         foreach (var t in trades.Trades)
@@ -60,7 +71,8 @@ public sealed class FillTracker
             events.Add(BuildOpenFill(match, trade, gapBuy, gapSell));
         }
 
-        // Disappeared tickets -> close fills (look up history for price/profit).
+        // Disappeared tickets -> close fills. The history record may not be
+        // written yet; wait for it within a grace window before emitting zeros.
         foreach (var ticket in _knownTickets)
         {
             if (current.Contains(ticket))
@@ -73,7 +85,22 @@ public sealed class FillTracker
                 continue;
             }
 
-            events.Add(BuildCloseFill(ctx, ticket, FindHistory(history, ticket), gapBuy, gapSell));
+            _awaitingHistory[ticket] = (ctx, nowMs + HistoryGraceMs);
+        }
+
+        if (_awaitingHistory.Count > 0)
+        {
+            foreach (var (ticket, pending) in _awaitingHistory.ToArray())
+            {
+                var rec = FindHistory(history, ticket);
+                if (rec is null && nowMs < pending.DeadlineMs)
+                {
+                    continue;
+                }
+
+                _awaitingHistory.Remove(ticket);
+                events.Add(BuildCloseFill(pending.Context, ticket, rec, gapBuy, gapSell));
+            }
         }
 
         _knownTickets = current;
@@ -84,8 +111,17 @@ public sealed class FillTracker
     {
         _pendingOpens.Clear();
         _pendingCloses.Clear();
+        _awaitingHistory.Clear();
         _knownTickets = new HashSet<ulong>();
         _initialized = false;
+    }
+
+    private void ExpireStaleOpens(long nowMs)
+    {
+        while (_pendingOpens.TryPeek(out var head) && nowMs - head.DecideTimeMs > OpenTtlMs)
+        {
+            _pendingOpens.Dequeue();
+        }
     }
 
     private ClickContext? DequeueMatchingOpen(TradeSide side)

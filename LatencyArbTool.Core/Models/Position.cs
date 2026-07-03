@@ -30,4 +30,17 @@ public sealed class Position
     public int LowestPoint { get; set; }
 
     public long ClusterId { get; init; }
+
+    // Broker ticket, known once the open fill is observed in the trades map.
+    // Null until then; used to close the exact position instead of "row 0".
+    public ulong? Ticket { get; set; }
+
+    // A close was decided but the close click has not been confirmed yet. The
+    // position stays owned by the engine (and keeps emitting retry closes)
+    // until ConfirmClose reports the click succeeded.
+    public bool CloseRequested { get; set; }
+
+    public string? CloseReason { get; set; }
+
+    public long LastCloseAttemptMs { get; set; }
 }

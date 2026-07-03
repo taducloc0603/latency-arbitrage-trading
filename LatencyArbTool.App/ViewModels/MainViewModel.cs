@@ -22,6 +22,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly OpenSignalEngine _signalEngine = new();
     private readonly TrailingStopEngine _trailingEngine = new();
     private readonly FillTracker _fillTracker = new();
+    private readonly SharedMemoryCommandWriter _commandWriter = new();
     private readonly Dictionary<ulong, FillEvent> _openFills = new();
     private readonly Dictionary<ulong, FillEvent> _closeFills = new();
     private readonly DispatcherTimer _timer;
@@ -66,6 +67,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private int? _openGapAtOpen;
     private int? _openEntryPoint;
     private long _lastSnapshotMs;
+
+    // No re-open until this UTC ms (set after every close: cooldown against
+    // instantly re-entering the same adverse condition).
+    private long _reopenBlockedUntilMs;
+
+    // Hard-SL command awaiting the EA's ack (0 = none pending).
+    private int _pendingSlCmdSeq;
+    private ulong _pendingSlTicket;
 
     public MainViewModel()
     {
@@ -270,6 +279,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _signalEngine.Reset();
         _fillTracker.Reset();
         _lastSnapshotMs = 0;
+        _reopenBlockedUntilMs = 0;
+        _pendingSlCmdSeq = 0;
         IsRunning = true;
         _timer.Start();
         var initialHistory = _historyReader.TryReadForTickMap(MapNameB);
@@ -340,7 +351,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var bHistory = _historyReader.TryReadForTickMap(MapNameB);
         UpdateBTradesUi(bTrades);
 
-        if (tickA.Tick is null || tickB.Tick is null)
+        // B quotes are required for everything (opens fill on B, closes price on
+        // B). Feed A is only needed to compute the gap for OPENS — when it is
+        // down, close management (SL/trailing) keeps running on B alone.
+        if (tickB.Tick is null)
         {
             UpdateBHistoryUi(bHistory, config.Point);
             return;
@@ -350,16 +364,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var b = tickB.Tick;
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var nowTick = Environment.TickCount64;
-        var (gapBuy, gapSell) = GapCalculator.Calculate(a, b, config.Point);
 
-        // Signal only opens; it is ignored by the engine while a position is held.
-        var signal = _signalEngine.Evaluate(gapBuy, gapSell, nowMs, config);
+        var gapBuy = 0;
+        var gapSell = 0;
+        SignalSide? signal = null;
+        if (a is not null)
+        {
+            (gapBuy, gapSell) = GapCalculator.Calculate(a, b, config.Point);
+
+            // Signal only opens; it is ignored by the engine while a position is
+            // held, and suppressed while a feed is stale or a cooldown is active.
+            signal = FilterSignal(_signalEngine.Evaluate(gapBuy, gapSell, nowMs, config), a, b, nowTick, nowMs, config);
+        }
+
         var events = _trailingEngine.Step(b.Bid, b.Ask, signal, nowMs, config);
 
         UpdateMarketUi(a, b, gapBuy, gapSell, config);
 
         // ~1s market/gap/window snapshot for offline analysis (logged even when idle).
-        if (nowMs - _lastSnapshotMs >= 1000)
+        if (a is not null && nowMs - _lastSnapshotMs >= 1000)
         {
             _lastSnapshotMs = nowMs;
             var w = _signalEngine.CurrentWindow(nowMs);
@@ -381,10 +404,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
             else if (e.Decision == "live close")
             {
+                // Kept until the close is confirmed so retry events log the same
+                // entry context.
                 gapAtOpen = _openGapAtOpen ?? 0;
                 entryPoint = _openEntryPoint ?? 0;
-                _openGapAtOpen = null;
-                _openEntryPoint = null;
             }
             else
             {
@@ -395,33 +418,54 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             AddLog(DescribeEvent(e, gapBuy, gapSell, window));
             _csvLogger?.LogEvent(e, gapAtOpen, entryPoint, window);
 
-            var result = ExecuteLive(e, bTrades);
-            if (result.Success)
+            var closeTicket = _trailingEngine.Current?.Ticket;
+            var result = ExecuteLive(e, bTrades, closeTicket, b.Symbol);
+            var side = e.Side ?? DryRunSide.BuyB;
+
+            if (e.Decision == "live open")
             {
-                var side = e.Side ?? DryRunSide.BuyB;
-                if (e.Decision == "live open")
+                if (result.Success)
                 {
                     _fillTracker.RecordOpenClick(new ClickContext(nowMs, nowTick, gapAtOpen, e.OpenPrice, side, e.ClusterId, "live open"));
                 }
-                else if (e.Decision == "live close" && bTrades.Success && bTrades.Trades.Count > 0)
+                else if (e.ClusterId is { } cid && _trailingEngine.AbortOpen(cid))
                 {
-                    _fillTracker.RecordCloseClick(bTrades.Trades[0].Ticket,
-                        new ClickContext(nowMs, nowTick, gapAtOpen, e.ClosePrice, side, e.ClusterId, "live close"));
+                    // No broker position was created; drop the phantom so the
+                    // engine can act on the next confirmed signal.
+                    AddLog($"open click failed -> rolled back (cluster {cid})");
                 }
-            }
 
-            // A fresh open consumes the signal: reset so re-entry requires a new
-            // confirm window rather than firing every tick the gap stays extreme.
-            if (e.Decision == "live open")
-            {
+                // The attempt consumed the signal either way: a retry (after a
+                // failed click) must earn a fresh confirm window rather than
+                // firing every tick the gap stays extreme.
                 _signalEngine.Reset();
             }
+            else if (e.Decision == "live close" && result.Success)
+            {
+                var closedTicket = closeTicket ?? FindSymbolTicket(bTrades, b.Symbol);
+                if (closedTicket != 0)
+                {
+                    _fillTracker.RecordCloseClick(closedTicket,
+                        new ClickContext(nowMs, nowTick, gapAtOpen, e.ClosePrice, side, e.ClusterId, "live close"));
+                }
+
+                if (e.ClusterId is { } cid)
+                {
+                    _trailingEngine.ConfirmClose(cid);
+                }
+
+                BeginReopenCooldown(nowMs, config);
+                _openGapAtOpen = null;
+                _openEntryPoint = null;
+            }
+            // Close click failed: the engine keeps the position and re-emits the
+            // close on its retry cadence — no orphaned broker position.
         }
 
         // Observe fills first so _openFills/_closeFills are populated before the
         // history UI rebuild — ensures SlipClose is available on the same tick the
         // trade closes and the history count increases.
-        foreach (var fill in _fillTracker.Observe(bTrades, bHistory, gapBuy, gapSell))
+        foreach (var fill in _fillTracker.Observe(bTrades, bHistory, gapBuy, gapSell, nowMs))
         {
             if (fill.IsClose)
                 _closeFills[fill.Ticket] = fill;
@@ -431,15 +475,181 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             AddLog(DescribeFill(fill, config.Point));
             _csvLogger?.LogFill(fill);
 
-            // Re-anchor SL/trailing to the broker's real fill price once known.
+            // Re-anchor SL/trailing to the broker's real fill price once known,
+            // then arm the broker-side hard SL on the real ticket.
             if (!fill.IsClose && fill.ClusterId is { } cid
-                && _trailingEngine.ApplyOpenFill(cid, fill.FillPrice, config.Point))
+                && _trailingEngine.ApplyOpenFill(cid, fill.Ticket, fill.FillPrice, config.Point))
             {
                 AddLog($"entry corrected -> {F(fill.FillPrice)} ({GapCalculator.ToPoints(fill.FillPrice, config.Point)}pt)");
+                RequestHardSl(fill, config);
             }
         }
 
+        ReconcileExternalClose(bTrades, b.Symbol, nowMs, config);
+        PollHardSlAck();
+
         UpdateBHistoryUi(bHistory, config.Point);
+    }
+
+    // Suppresses an open signal when a feed is stale or the post-close cooldown
+    // is active. Also resets the confirm window so the signal must be re-earned
+    // once conditions are healthy again (prevents an instant stale refire).
+    private SignalSide? FilterSignal(SignalSide? signal, TickRecord a, TickRecord b, long nowTick, long nowMs, StrategyConfig config)
+    {
+        if (signal is null)
+        {
+            return null;
+        }
+
+        var silenceA = nowTick - a.EaTickCountMs;
+        var silenceB = nowTick - b.EaTickCountMs;
+        var stale = silenceA < 0 || silenceA > config.MaxFeedSilenceMs
+                    || silenceB < 0 || silenceB > config.MaxFeedSilenceMs;
+        if (stale)
+        {
+            _signalEngine.Reset();
+            AddLog($"open blocked: feed stale (A={silenceA}ms B={silenceB}ms, max={config.MaxFeedSilenceMs}ms)");
+            return null;
+        }
+
+        if (nowMs < _reopenBlockedUntilMs)
+        {
+            _signalEngine.Reset();
+            AddLog($"open blocked: cooldown {_reopenBlockedUntilMs - nowMs}ms left");
+            return null;
+        }
+
+        return signal;
+    }
+
+    private void BeginReopenCooldown(long nowMs, StrategyConfig config)
+    {
+        _signalEngine.Reset();
+        if (config.ReopenCooldownMs > 0)
+        {
+            _reopenBlockedUntilMs = nowMs + config.ReopenCooldownMs;
+        }
+    }
+
+    // An open click that "succeeded" can still produce no position (order
+    // rejected by the broker). If no ticket showed up on our symbol this long
+    // after the open, the position is a phantom and is dropped.
+    private const long PhantomOpenTimeoutMs = 10_000;
+
+    // The broker can close our position without us clicking (hard SL hit, manual
+    // close). When the engine's ticket vanishes from the trades map, go flat so
+    // the engine doesn't manage (or retry-close) a position that no longer exists.
+    private void ReconcileExternalClose(TradeReadResult bTrades, string symbol, long nowMs, StrategyConfig config)
+    {
+        if (_trailingEngine.Current is not { } pos || !bTrades.Success)
+        {
+            return;
+        }
+
+        if (pos.Ticket is { } ticket)
+        {
+            foreach (var t in bTrades.Trades)
+            {
+                if (t.Ticket == ticket)
+                {
+                    return;
+                }
+            }
+
+            AddLog($"position #{ticket} closed externally (hard SL / manual) -> engine flat");
+            GoFlat(pos, nowMs, config);
+            return;
+        }
+
+        // No fill was ever observed: if nothing is open on our symbol well after
+        // the click, the open never actually filled — drop the phantom so the
+        // engine doesn't hold (and retry-close) a position that never existed.
+        if (nowMs - pos.OpenedAtMs < PhantomOpenTimeoutMs)
+        {
+            return;
+        }
+
+        foreach (var t in bTrades.Trades)
+        {
+            if (string.Equals(t.Symbol, symbol, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        AddLog($"open never filled (no position {PhantomOpenTimeoutMs / 1000}s after click) -> engine flat");
+        GoFlat(pos, nowMs, config);
+    }
+
+    private void GoFlat(Position pos, long nowMs, StrategyConfig config)
+    {
+        _trailingEngine.ConfirmClose(pos.ClusterId);
+        BeginReopenCooldown(nowMs, config);
+        _openGapAtOpen = null;
+        _openEntryPoint = null;
+    }
+
+    // Broker-side hard SL: soft SL (StopLossPoint) + buffer, placed on the real
+    // ticket via the EA command map. It is the last-resort stop when the app,
+    // feed or close click fails; the soft stop still closes first normally.
+    private void RequestHardSl(FillEvent fill, StrategyConfig config)
+    {
+        if (config.HardSlBufferPt <= 0)
+        {
+            return;
+        }
+
+        var distance = (config.StopLossPoint + config.HardSlBufferPt) / (double)config.Point;
+        var sl = fill.Side == DryRunSide.BuyB ? fill.FillPrice - distance : fill.FillPrice + distance;
+        var mapName = SharedMemoryMapNames.CmdFromTick(MapNameB);
+
+        if (_commandWriter.TryWriteSetSl(mapName, fill.Ticket, sl, out var seq, out var error))
+        {
+            _pendingSlCmdSeq = seq;
+            _pendingSlTicket = fill.Ticket;
+            AddLog($"hard SL request #{fill.Ticket} sl={F(sl)} ({config.StopLossPoint}+{config.HardSlBufferPt}pt)");
+        }
+        else
+        {
+            AddLog($"hard SL request FAILED #{fill.Ticket}: {error}");
+        }
+    }
+
+    private void PollHardSlAck()
+    {
+        if (_pendingSlCmdSeq == 0)
+        {
+            return;
+        }
+
+        var ack = _commandWriter.TryReadAck(SharedMemoryMapNames.CmdFromTick(MapNameB));
+        if (ack is not { } a || a.Seq != _pendingSlCmdSeq)
+        {
+            return;
+        }
+
+        AddLog(a.Ok
+            ? $"hard SL set on #{_pendingSlTicket}"
+            : $"hard SL FAILED on #{_pendingSlTicket} (retcode={a.Retcode}) — check AutoTrading is enabled");
+        _pendingSlCmdSeq = 0;
+    }
+
+    private static ulong FindSymbolTicket(TradeReadResult bTrades, string symbol)
+    {
+        if (!bTrades.Success)
+        {
+            return 0;
+        }
+
+        foreach (var t in bTrades.Trades)
+        {
+            if (string.Equals(t.Symbol, symbol, StringComparison.OrdinalIgnoreCase))
+            {
+                return t.Ticket;
+            }
+        }
+
+        return 0;
     }
 
     private static string DescribeEvent(DryRunEvent e, int gapBuy, int gapSell, SignalWindow? window)
@@ -495,9 +705,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return latency is >= 0 and <= 86_400_000 ? $"{latency} ms" : "unknown";
     }
 
-    private LiveTradeResult ExecuteLive(DryRunEvent e, TradeReadResult bTrades)
+    private LiveTradeResult ExecuteLive(DryRunEvent e, TradeReadResult bTrades, ulong? closeTicket, string symbol)
     {
-        var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades);
+        var result = _tradeExecutor.Execute(e, ChartHwndText, TradeHwndText, bTrades, closeTicket, symbol);
         if (result.Attempted)
         {
             var prefix = result.Success ? "live ok" : "live failed";
@@ -508,14 +718,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return result;
     }
 
-    private void UpdateMarketUi(TickRecord a, TickRecord b, int gapBuy, int gapSell, StrategyConfig config)
+    private void UpdateMarketUi(TickRecord? a, TickRecord b, int gapBuy, int gapSell, StrategyConfig config)
     {
         var nowTickCountMs = Environment.TickCount64;
-        SymbolA = a.Symbol;
-        BidA = F(a.Bid);
-        AskA = F(a.Ask);
-        SpreadA = F(a.Spread);
-        LatencyA = FormatLatency(nowTickCountMs, a.EaTickCountMs);
+        if (a is not null)
+        {
+            SymbolA = a.Symbol;
+            BidA = F(a.Bid);
+            AskA = F(a.Ask);
+            SpreadA = F(a.Spread);
+            LatencyA = FormatLatency(nowTickCountMs, a.EaTickCountMs);
+        }
+        else
+        {
+            LatencyA = "-";
+        }
+
         SymbolB = b.Symbol;
         BidB = F(b.Bid);
         AskB = F(b.Ask);

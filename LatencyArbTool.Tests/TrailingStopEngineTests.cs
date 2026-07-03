@@ -18,6 +18,9 @@ public sealed class TrailingStopEngineTests
     private static DryRunEvent? Step(TrailingStopEngine e, double price, SignalSide? signal, long t, StrategyConfig c)
         => e.Step(price, price, signal, t, c).SingleOrDefault();
 
+    private static void CloseAndConfirm(TrailingStopEngine e, DryRunEvent close)
+        => Assert.True(e.ConfirmClose(close.ClusterId!.Value));
+
     [Fact]
     public void Buy_OpensOnSignalThenStopLoss()
     {
@@ -32,7 +35,72 @@ public sealed class TrailingStopEngineTests
         var close = Step(e, 950, null, 2, c);  // 950 <= 1000-50
         Assert.Equal("live close", close!.Decision);
         Assert.Equal("stop loss", close.Reason);
+
+        // The engine keeps the position until the close click is confirmed.
+        Assert.False(e.IsFlat);
+        CloseAndConfirm(e, close);
         Assert.True(e.IsFlat);
+    }
+
+    [Fact]
+    public void Close_NotConfirmed_RetriesOnCadence()
+    {
+        var e = new TrailingStopEngine();
+        var c = Cfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+
+        var close = Step(e, 950, null, 1000, c);
+        Assert.Equal("stop loss", close!.Reason);
+
+        // Within the retry window: no duplicate close event, and no re-open even
+        // if a signal arrives (the position is still owned by the engine).
+        Assert.Null(Step(e, 951, SignalSide.BuyB, 1200, c));
+
+        // After the retry window a retry close is emitted at the current price.
+        var retry = Step(e, 949, null, 1600, c);
+        Assert.Equal("live close", retry!.Decision);
+        Assert.Equal("stop loss (retry)", retry.Reason);
+        Assert.False(e.IsFlat);
+
+        CloseAndConfirm(e, retry);
+        Assert.True(e.IsFlat);
+    }
+
+    [Fact]
+    public void AbortOpen_RollsBackFailedOpenClick()
+    {
+        var e = new TrailingStopEngine();
+        var c = Cfg();
+
+        var open = Step(e, 1000, SignalSide.BuyB, 0, c);
+        Assert.False(e.IsFlat);
+
+        Assert.True(e.AbortOpen(open!.ClusterId!.Value));
+        Assert.True(e.IsFlat);
+    }
+
+    [Fact]
+    public void AbortOpen_IgnoredOnceCloseRequested()
+    {
+        var e = new TrailingStopEngine();
+        var c = Cfg();
+        var open = Step(e, 1000, SignalSide.BuyB, 0, c);
+        Step(e, 950, null, 1, c); // close requested
+
+        Assert.False(e.AbortOpen(open!.ClusterId!.Value));
+        Assert.False(e.IsFlat);
+    }
+
+    [Fact]
+    public void ConfirmClose_WrongCluster_NoChange()
+    {
+        var e = new TrailingStopEngine();
+        var c = Cfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+        Step(e, 950, null, 1, c);
+
+        Assert.False(e.ConfirmClose(999));
+        Assert.False(e.IsFlat);
     }
 
     [Fact]
@@ -94,7 +162,7 @@ public sealed class TrailingStopEngineTests
     }
 
     [Fact]
-    public void ApplyOpenFill_ReanchorsEntryForStopLoss()
+    public void ApplyOpenFill_ReanchorsEntryForStopLossAndStoresTicket()
     {
         var e = new TrailingStopEngine();
         var c = Cfg(); // point=1, SL=50
@@ -102,8 +170,9 @@ public sealed class TrailingStopEngineTests
         Step(e, 1000, SignalSide.BuyB, 0, c);     // decide entry = 1000
         var id = e.Current!.ClusterId;
 
-        Assert.True(e.ApplyOpenFill(id, 1010, c.Point)); // real fill 1010
+        Assert.True(e.ApplyOpenFill(id, 777, 1010, c.Point)); // real fill 1010
         Assert.Equal(1010, e.Current!.EntryPoint);
+        Assert.Equal(777ul, e.Current!.Ticket);
 
         Assert.Null(Step(e, 961, null, 1, c));     // safe vs new SL (1010-50=960)
         var close = Step(e, 960, null, 2, c);      // hits SL at real entry
@@ -117,8 +186,9 @@ public sealed class TrailingStopEngineTests
         var c = Cfg();
         Step(e, 1000, SignalSide.BuyB, 0, c);
 
-        Assert.False(e.ApplyOpenFill(999, 1010, c.Point));
+        Assert.False(e.ApplyOpenFill(999, 777, 1010, c.Point));
         Assert.Equal(1000, e.Current!.EntryPoint);
+        Assert.Null(e.Current!.Ticket);
     }
 
     [Fact]

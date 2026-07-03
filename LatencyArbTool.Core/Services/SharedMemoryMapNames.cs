@@ -17,6 +17,11 @@ public static class SharedMemoryMapNames
         return ReplaceTickSuffix(tickMapName, "History");
     }
 
+    public static string CmdFromTick(string tickMapName)
+    {
+        return ReplaceTickSuffix(tickMapName, "Cmd");
+    }
+
     private static string ReplaceTickSuffix(string tickMapName, string suffix)
     {
         if (string.IsNullOrWhiteSpace(tickMapName))

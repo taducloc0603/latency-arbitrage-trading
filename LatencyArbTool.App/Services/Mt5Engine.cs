@@ -81,6 +81,26 @@ public sealed class Mt5Engine : IMt5TradeGateway, IDisposable
         }
     }
 
+    public bool RecreateContextFromParent(ulong parentHwnd, out string error)
+    {
+        error = string.Empty;
+        try
+        {
+            if (CreateContextFromParent(parentHwnd))
+            {
+                return true;
+            }
+
+            error = $"could not recreate context from parent HWND 0x{parentHwnd:X}";
+            return false;
+        }
+        catch (Exception ex) when (IsNativeLoadException(ex))
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
     public int UpdateRowCount()
     {
         return _ctx == IntPtr.Zero ? 0 : Mt5Native.mt_update_row_count(_ctx);
