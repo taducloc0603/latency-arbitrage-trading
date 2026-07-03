@@ -677,6 +677,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             "live close" =>
                 $"live close {side} {e.Reason} exit={F(e.ClosePrice)} " +
                 $"pnl={Signed((int)e.PnlRaw)}pt " +
+                (e.StopLevelPrice > 0 ? $"max={F(e.StopRefPrice)} stop={F(e.StopLevelPrice)} " : string.Empty) +
                 $"hold={e.HoldMs / 1000.0:0.0}s",
             _ => $"{e.Decision}: {e.Reason}",
         };

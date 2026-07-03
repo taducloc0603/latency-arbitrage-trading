@@ -252,6 +252,36 @@ public sealed class TrailingStopEngineTests
     }
 
     [Fact]
+    public void Buy_StopLossClose_ReportsMaxAndStopLevel()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg(); // point=1 so price == point
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+        Step(e, 1040, null, 1, c); // Max = 1040
+
+        var close = Step(e, 960, null, 2, c); // stop = 1040 - 80 = 960
+        Assert.Equal("stop loss", close!.Reason);
+        Assert.False(close.TrailingActive);
+        Assert.Equal(1040, close.StopRefPrice, 5);  // Max
+        Assert.Equal(960, close.StopLevelPrice, 5);  // Max - StopLoss
+    }
+
+    [Fact]
+    public void Buy_TrailingClose_ReportsStepStopLevel()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+        Step(e, 1120, null, 1, c); // active; Max = 1120
+
+        var close = Step(e, 1070, null, 2, c); // stop = 1120 - 50 = 1070
+        Assert.Equal("trailing stop", close!.Reason);
+        Assert.True(close.TrailingActive);
+        Assert.Equal(1120, close.StopRefPrice, 5);
+        Assert.Equal(1070, close.StopLevelPrice, 5); // Max - TrailingStep, NOT Max - SL
+    }
+
+    [Fact]
     public void Buy_ActivationGapTickDoesNotInstantClose()
     {
         var e = new TrailingStopEngine();

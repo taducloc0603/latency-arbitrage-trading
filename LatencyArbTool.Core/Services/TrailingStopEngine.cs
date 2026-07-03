@@ -137,6 +137,11 @@ public sealed class TrailingStopEngine
 
         string? reason = null;
 
+        // Ref = the best price since open (Max for BUY / Min for SELL); the stop
+        // trails it. StopLevel is where the position closes this tick.
+        int stopRef;
+        int stopLevel;
+
         if (pos.Side == SignalSide.BuyB)
         {
             if (current > pos.HighestPoint)
@@ -149,12 +154,26 @@ public sealed class TrailingStopEngine
                 pos.TrailingActive = true;
             }
 
-            var stop = pos.TrailingActive
-                ? pos.HighestPoint - config.TrailingStepPoint
-                : pos.HighestPoint - config.StopLossPoint;
-            if (current <= stop)
+            stopRef = pos.HighestPoint;
+            if (!pos.TrailingActive)
             {
-                reason = pos.TrailingActive ? "trailing stop" : "stop loss";
+                // HARD STOP-LOSS GUARD (business rule — do not remove): while not
+                // trailing, close the moment Max - StopLoss reaches the price so a
+                // position never sits past the SL threshold. Skipped once trailing
+                // is active (the tighter trailing step takes over).
+                stopLevel = pos.HighestPoint - config.StopLossPoint;
+                if (current <= stopLevel)
+                {
+                    reason = "stop loss";
+                }
+            }
+            else
+            {
+                stopLevel = pos.HighestPoint - config.TrailingStepPoint;
+                if (current <= stopLevel)
+                {
+                    reason = "trailing stop";
+                }
             }
         }
         else
@@ -169,12 +188,23 @@ public sealed class TrailingStopEngine
                 pos.TrailingActive = true;
             }
 
-            var stop = pos.TrailingActive
-                ? pos.LowestPoint + config.TrailingStepPoint
-                : pos.LowestPoint + config.StopLossPoint;
-            if (current >= stop)
+            stopRef = pos.LowestPoint;
+            if (!pos.TrailingActive)
             {
-                reason = pos.TrailingActive ? "trailing stop" : "stop loss";
+                // HARD STOP-LOSS GUARD (SELL mirror).
+                stopLevel = pos.LowestPoint + config.StopLossPoint;
+                if (current >= stopLevel)
+                {
+                    reason = "stop loss";
+                }
+            }
+            else
+            {
+                stopLevel = pos.LowestPoint + config.TrailingStepPoint;
+                if (current >= stopLevel)
+                {
+                    reason = "trailing stop";
+                }
             }
         }
 
@@ -186,7 +216,7 @@ public sealed class TrailingStopEngine
         pos.CloseRequested = true;
         pos.CloseReason = reason;
         pos.LastCloseAttemptMs = nowMs;
-        events.Add(BuildCloseEvent(pos, reason, closePrice, current, nowMs));
+        events.Add(BuildCloseEvent(pos, reason, closePrice, current, stopRef, stopLevel, config.Point, nowMs));
     }
 
     private void RetryClose(double bidB, double askB, long nowMs, StrategyConfig config, List<DryRunEvent> events)
@@ -200,10 +230,14 @@ public sealed class TrailingStopEngine
         pos.LastCloseAttemptMs = nowMs;
         var closePrice = pos.Side == SignalSide.BuyB ? bidB : askB;
         var current = GapCalculator.ToPoints(closePrice, config.Point);
-        events.Add(BuildCloseEvent(pos, $"{pos.CloseReason} (retry)", closePrice, current, nowMs));
+        var stopRef = pos.Side == SignalSide.BuyB ? pos.HighestPoint : pos.LowestPoint;
+        var step = pos.TrailingActive ? config.TrailingStepPoint : config.StopLossPoint;
+        var stopLevel = pos.Side == SignalSide.BuyB ? stopRef - step : stopRef + step;
+        events.Add(BuildCloseEvent(pos, $"{pos.CloseReason} (retry)", closePrice, current, stopRef, stopLevel, config.Point, nowMs));
     }
 
-    private static DryRunEvent BuildCloseEvent(Position pos, string reason, double closePrice, int current, long nowMs)
+    private static DryRunEvent BuildCloseEvent(
+        Position pos, string reason, double closePrice, int current, int stopRefPoint, int stopLevelPoint, int point, long nowMs)
     {
         var pnlPoints = pos.Side == SignalSide.BuyB
             ? current - pos.EntryPoint
@@ -220,7 +254,9 @@ public sealed class TrailingStopEngine
             ClosePrice: closePrice,
             PnlRaw: pnlPoints,
             HoldMs: nowMs - pos.OpenedAtMs,
-            TrailingActive: pos.TrailingActive);
+            TrailingActive: pos.TrailingActive,
+            StopRefPrice: point > 0 ? stopRefPoint / (double)point : 0,
+            StopLevelPrice: point > 0 ? stopLevelPoint / (double)point : 0);
     }
 
     private static DryRunSide ToDrySide(SignalSide side) =>
