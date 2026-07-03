@@ -18,7 +18,6 @@ public sealed record StrategyConfig(
     string MapB,
     string? ChartHwndB,        // HWND of B chart (click buy/sell)
     string? TradeHwndB,        // HWND of B trade panel (close)
-    int HardSlBufferPt = 20,   // broker-side hard SL = StopLossPoint + this (<=0 disables hard SL)
     int MaxFeedSilenceMs = 500,  // opens are blocked while a feed is older than this
     int ReopenCooldownMs = 3000) // no re-open for this long after a close
 {

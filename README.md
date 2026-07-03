@@ -99,7 +99,7 @@ PnL khi dong (point): `BUY = Current - Entry`, `SELL = Entry - Current`.
 > cham state engine); dong theo dung ticket, native close nam trong `_nativeTradeLock`
 > chung voi UI thread. Han che: day KHONG phai SL server-side — mot gap 1 tick van
 > co the da vuot moc tai chinh tick watchdog nhin thay, cong do tre native click.
-> (`hard_sl_buffer_pt` khong con duoc dung o ban tang-tool nay.)
+> Stop = dung `Max - stop_loss_point` (KHONG cong buffer).
 
 ---
 

@@ -87,7 +87,6 @@ public sealed class SupabaseConfigRepository
         MapB: string.IsNullOrWhiteSpace(r.MapB) ? StrategyConfig.Default.MapB : r.MapB!,
         ChartHwndB: r.ChartHwndB,
         TradeHwndB: r.TradeHwndB,
-        HardSlBufferPt: r.HardSlBufferPt ?? StrategyConfig.Default.HardSlBufferPt,
         MaxFeedSilenceMs: r.MaxFeedSilenceMs ?? StrategyConfig.Default.MaxFeedSilenceMs,
         ReopenCooldownMs: r.ReopenCooldownMs ?? StrategyConfig.Default.ReopenCooldownMs);
 
@@ -113,7 +112,6 @@ public sealed class SupabaseConfigRepository
         [JsonPropertyName("map_b")] public string? MapB { get; set; }
         [JsonPropertyName("chart_hwnd_b")] public string? ChartHwndB { get; set; }
         [JsonPropertyName("trade_hwnd_b")] public string? TradeHwndB { get; set; }
-        [JsonPropertyName("hard_sl_buffer_pt")] public int? HardSlBufferPt { get; set; }
         [JsonPropertyName("max_feed_silence_ms")] public int? MaxFeedSilenceMs { get; set; }
         [JsonPropertyName("reopen_cooldown_ms")] public int? ReopenCooldownMs { get; set; }
     }
