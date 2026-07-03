@@ -770,9 +770,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         PositionSide = pos.Side.ToString();
         EntryPoint = pos.EntryPoint.ToString(CultureInfo.InvariantCulture);
         CurrentPoint = current.ToString(CultureInfo.InvariantCulture);
+        // The stop trails the best price since open in both phases.
         TrailingState = pos.TrailingActive
             ? $"active, ref={(pos.Side == SignalSide.BuyB ? pos.HighestPoint : pos.LowestPoint)}"
-            : $"SL@{(pos.Side == SignalSide.BuyB ? pos.EntryPoint - config.StopLossPoint : pos.EntryPoint + config.StopLossPoint)}";
+            : $"SL@{(pos.Side == SignalSide.BuyB ? pos.HighestPoint - config.StopLossPoint : pos.LowestPoint + config.StopLossPoint)}";
     }
 
     private void UpdateBTradesUi(TradeReadResult r)

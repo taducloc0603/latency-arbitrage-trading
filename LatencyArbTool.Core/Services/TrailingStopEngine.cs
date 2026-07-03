@@ -3,8 +3,16 @@ using LatencyArbTool.Core.Models;
 namespace LatencyArbTool.Core.Services;
 
 // Manages the single live position on B. Opening happens ONLY when a signal is
-// supplied and we are flat. Closing is signal-independent: every tick we check
-// Stop-Loss (while trailing not yet active) then Trailing-Stop (once active).
+// supplied and we are flat. Closing is signal-independent and follows a
+// ratcheting stop off the best price since open (BUY shown; SELL mirrors):
+//
+//   1. MaxPrice = max(MaxPrice, Current)              — every tick, always
+//   2. Current >= Entry + TrailingStart -> TrailingActive
+//   3. Stop = MaxPrice - (TrailingActive ? TrailingStep : StopLoss)
+//   4. Current <= Stop -> close ("trailing stop" / "stop loss")
+//
+// So even before trailing activates the stop trails the peak (MaxPrice - SL),
+// not the entry.
 //
 // The engine's state must mirror the broker's: a position is only dropped after
 // the caller confirms the close click succeeded (ConfirmClose) or the position
@@ -33,6 +41,19 @@ public sealed class TrailingStopEngine
         {
             pos.Ticket = ticket;
             pos.EntryPoint = GapCalculator.ToPoints(fillPrice, point);
+
+            // The stop references trail the best price since open, which was
+            // seeded from the decide price — widen them to cover the real fill.
+            if (pos.EntryPoint > pos.HighestPoint)
+            {
+                pos.HighestPoint = pos.EntryPoint;
+            }
+
+            if (pos.EntryPoint < pos.LowestPoint)
+            {
+                pos.LowestPoint = pos.EntryPoint;
+            }
+
             return true;
         }
 
@@ -118,58 +139,42 @@ public sealed class TrailingStopEngine
 
         if (pos.Side == SignalSide.BuyB)
         {
-            if (!pos.TrailingActive)
+            if (current > pos.HighestPoint)
             {
-                if (current <= pos.EntryPoint - config.StopLossPoint)
-                {
-                    reason = "stop loss";
-                }
-                else if (current >= pos.EntryPoint + config.TrailingStartPoint)
-                {
-                    pos.TrailingActive = true;
-                    pos.HighestPoint = current;
-                }
+                pos.HighestPoint = current;
             }
 
-            if (reason is null && pos.TrailingActive)
+            if (!pos.TrailingActive && current >= pos.EntryPoint + config.TrailingStartPoint)
             {
-                if (current > pos.HighestPoint)
-                {
-                    pos.HighestPoint = current;
-                }
+                pos.TrailingActive = true;
+            }
 
-                if (current <= pos.HighestPoint - config.TrailingStepPoint)
-                {
-                    reason = "trailing stop";
-                }
+            var stop = pos.TrailingActive
+                ? pos.HighestPoint - config.TrailingStepPoint
+                : pos.HighestPoint - config.StopLossPoint;
+            if (current <= stop)
+            {
+                reason = pos.TrailingActive ? "trailing stop" : "stop loss";
             }
         }
         else
         {
-            if (!pos.TrailingActive)
+            if (current < pos.LowestPoint)
             {
-                if (current >= pos.EntryPoint + config.StopLossPoint)
-                {
-                    reason = "stop loss";
-                }
-                else if (current <= pos.EntryPoint - config.TrailingStartPoint)
-                {
-                    pos.TrailingActive = true;
-                    pos.LowestPoint = current;
-                }
+                pos.LowestPoint = current;
             }
 
-            if (reason is null && pos.TrailingActive)
+            if (!pos.TrailingActive && current <= pos.EntryPoint - config.TrailingStartPoint)
             {
-                if (current < pos.LowestPoint)
-                {
-                    pos.LowestPoint = current;
-                }
+                pos.TrailingActive = true;
+            }
 
-                if (current >= pos.LowestPoint + config.TrailingStepPoint)
-                {
-                    reason = "trailing stop";
-                }
+            var stop = pos.TrailingActive
+                ? pos.LowestPoint + config.TrailingStepPoint
+                : pos.LowestPoint + config.StopLossPoint;
+            if (current >= stop)
+            {
+                reason = pos.TrailingActive ? "trailing stop" : "stop loss";
             }
         }
 

@@ -191,6 +191,95 @@ public sealed class TrailingStopEngineTests
         Assert.Null(e.Current!.Ticket);
     }
 
+    // Config matching the business spec's examples: SL=80, start=50, step=50.
+    private static StrategyConfig SpecCfg() => StrategyConfig.Default with
+    {
+        Point = 1,
+        StopLossPoint = 80,
+        TrailingStartPoint = 50,
+        TrailingStepPoint = 50,
+    };
+
+    [Fact]
+    public void Buy_StopTrailsMaxBeforeActivation()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+
+        // Spec example 1: 1000 -> 1040 -> 1030: Max=1040, stop=960, no close.
+        Assert.Null(Step(e, 1040, null, 1, c));
+        Assert.Null(Step(e, 1030, null, 2, c));
+
+        // Spec example 3: drop to 980 then 960: stop is Max-80=960, NOT entry-80=920.
+        Assert.Null(Step(e, 980, null, 3, c));
+        var close = Step(e, 960, null, 4, c);
+        Assert.Equal("stop loss", close!.Reason);
+        Assert.False(close.TrailingActive);
+    }
+
+    [Fact]
+    public void Buy_StopStaysAtEntryWhilePriceBelowEntry()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+
+        // Spec example 2: 1000 -> 990 -> 995: Max stays 1000, stop=920.
+        Assert.Null(Step(e, 990, null, 1, c));
+        Assert.Null(Step(e, 995, null, 2, c));
+        Assert.Null(Step(e, 921, null, 3, c));
+        var close = Step(e, 920, null, 4, c);
+        Assert.Equal("stop loss", close!.Reason);
+    }
+
+    [Fact]
+    public void Buy_FullSequencePerSpec()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+
+        // 1040 -> 1050 (activates) -> 1080 -> 1120 -> 1100 -> 1070 closes.
+        Assert.Null(Step(e, 1040, null, 1, c));
+        Assert.Null(Step(e, 1050, null, 2, c)); // active; stop=1050-50=1000
+        Assert.Null(Step(e, 1080, null, 3, c));
+        Assert.Null(Step(e, 1120, null, 4, c)); // Max=1120, stop=1070
+        Assert.Null(Step(e, 1100, null, 5, c));
+        var close = Step(e, 1070, null, 6, c);
+        Assert.Equal("trailing stop", close!.Reason);
+        Assert.True(close.TrailingActive);
+    }
+
+    [Fact]
+    public void Buy_ActivationGapTickDoesNotInstantClose()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg();
+        Step(e, 1000, SignalSide.BuyB, 0, c);
+
+        // Single tick jumps straight to entry+start: activates, stop=1000, no close.
+        Assert.Null(Step(e, 1050, null, 1, c));
+        Assert.False(e.IsFlat);
+        Assert.True(e.Current!.TrailingActive);
+    }
+
+    [Fact]
+    public void Sell_StopTrailsMinBeforeActivation()
+    {
+        var e = new TrailingStopEngine();
+        var c = SpecCfg();
+        Step(e, 1000, SignalSide.SellB, 0, c);
+
+        // Mirror of the BUY example: 1000 -> 960 -> 970: Min=960, stop=1040.
+        Assert.Null(Step(e, 960, null, 1, c));  // not active (needs <= 950)
+        Assert.Null(Step(e, 970, null, 2, c));
+        Assert.Null(Step(e, 1039, null, 3, c));
+        var close = Step(e, 1040, null, 4, c);
+        Assert.Equal("stop loss", close!.Reason);
+        Assert.False(close.TrailingActive);
+    }
+
     [Fact]
     public void Open_OnlyWhenSignalAndFlat()
     {

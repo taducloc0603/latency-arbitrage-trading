@@ -23,10 +23,11 @@ public sealed class Position
 
     public bool TrailingActive { get; set; }
 
-    // Highest current price since trailing activated (BUY trailing reference).
+    // Highest close-side price since open (BUY stop reference: the stop trails
+    // this peak both before and after trailing activates).
     public int HighestPoint { get; set; }
 
-    // Lowest current price since trailing activated (SELL trailing reference).
+    // Lowest close-side price since open (SELL stop reference).
     public int LowestPoint { get; set; }
 
     public long ClusterId { get; init; }
