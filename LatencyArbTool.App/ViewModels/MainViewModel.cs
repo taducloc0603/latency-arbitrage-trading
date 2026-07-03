@@ -41,8 +41,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _statusB = "Not started";
     private string _statusBTrade = "Not started";
     private string _statusBHistory = "Not started";
-    private int _lastSessionCount = -1;
+    // Session-closed rows accumulate in BHistory (append-only, keyed by ticket)
+    // instead of being rebuilt from the history map: the map is bounded (132
+    // records / 24h window), so session records can be evicted from it while
+    // the session is still running.
+    private readonly HashSet<ulong> _sessionTickets = new();
     private ulong _sessionStartTimeMsc;
+    private bool _sessionBaselinePending;
+    private const int MaxHistoryRows = 500;
 
     private string _symbolA = "-";
     private string _symbolB = "-";
@@ -281,13 +287,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _lastSnapshotMs = 0;
         _reopenBlockedUntilMs = 0;
         _pendingSlCmdSeq = 0;
+
+        // Start = a fresh session: drop everything accumulated for the previous
+        // one and take the baseline so only closes after this moment are shown.
+        BHistory.Clear();
+        _sessionTickets.Clear();
+        _openFills.Clear();
+        _closeFills.Clear();
+        CaptureSessionBaseline();
+
         IsRunning = true;
         _timer.Start();
-        var initialHistory = _historyReader.TryReadForTickMap(MapNameB);
-        _sessionStartTimeMsc = initialHistory.Success && initialHistory.History.Count > 0
-            ? initialHistory.History[^1].CloseTimeMsc
-            : 0;
-        _lastSessionCount = -1;
         AddLog($"start; logs at {logsDirectory}");
     }
 
@@ -327,8 +337,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         StatusBHistory = "Not started";
         BTrades.Clear();
         BHistory.Clear();
-        _lastSessionCount = -1;
+        _sessionTickets.Clear();
         _sessionStartTimeMsc = 0;
+        _sessionBaselinePending = false;
         _openFills.Clear();
         _closeFills.Clear();
 
@@ -810,46 +821,120 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    // Grabs the newest close time already in the history map as the session
+    // baseline; only records closing after it count as "this session". When the
+    // map cannot be read at Start, the capture is deferred to the first
+    // successful read (so pre-session records are never shown by a 0 baseline).
+    private void CaptureSessionBaseline()
+    {
+        var initialHistory = _historyReader.TryReadForTickMap(MapNameB);
+        if (initialHistory.Success)
+        {
+            _sessionStartTimeMsc = initialHistory.History.Count > 0
+                ? initialHistory.History[^1].CloseTimeMsc
+                : 0;
+            _sessionBaselinePending = false;
+        }
+        else
+        {
+            _sessionBaselinePending = true;
+        }
+    }
+
     private void UpdateBHistoryUi(HistoryReadResult r, int point)
     {
-        var sessionCount = r.Success
-            ? r.History.Count(h => h.CloseTimeMsc > _sessionStartTimeMsc)
-            : 0;
-        StatusBHistory = r.Success ? $"Connected: {sessionCount} session closed" : $"Disconnected: {r.Error}";
-        if (!r.Success || sessionCount == _lastSessionCount)
+        if (!r.Success)
         {
+            StatusBHistory = $"Disconnected: {r.Error}";
             return;
         }
 
-        _lastSessionCount = sessionCount;
-        BHistory.Clear();
-        foreach (var h in r.History
-            .Where(h => h.CloseTimeMsc > _sessionStartTimeMsc)
-            .Reverse()
-            .Take(200))
+        if (_sessionBaselinePending)
         {
-            _openFills.TryGetValue(h.Ticket, out var openFill);
-            _closeFills.TryGetValue(h.Ticket, out var closeFill);
-            var displayOpenPrice = h.OpenPrice > 0 ? h.OpenPrice : (openFill?.FillPrice ?? 0);
-            BHistory.Add(new BHistoryRow(
-                h.Ticket,
-                h.Side.ToString(),
-                h.Volume,
-                displayOpenPrice,
-                h.ClosePrice,
-                h.StopLoss,
-                h.TakeProfit,
-                h.Commission,
-                h.Profit,
-                FormatTime(h.OpenTimeMsc),
-                FormatTime(h.CloseTimeMsc),
-                h.CloseEaTimeLocal,
-                h.Symbol,
-                GapOpen:  openFill is not null ? openFill.DecideGap : null,
-                SlipOpen:  openFill is not null ? GapCalculator.ToPoints(openFill.SlippagePrice, point) : null,
-                SlipClose: closeFill is not null && h.ClosePrice > 0
-                    ? GapCalculator.ToPoints(h.ClosePrice - closeFill.DecidePrice, point)
-                    : null));
+            _sessionStartTimeMsc = r.History.Count > 0 ? r.History[^1].CloseTimeMsc : 0;
+            _sessionBaselinePending = false;
+        }
+
+        // Append-only: each session close is inserted exactly once and stays on
+        // the grid even after the record is evicted from the bounded map.
+        foreach (var h in r.History) // oldest-first, so inserts keep newest on top
+        {
+            if (h.CloseTimeMsc <= _sessionStartTimeMsc || !_sessionTickets.Add(h.Ticket))
+            {
+                continue;
+            }
+
+            BHistory.Insert(0, BuildHistoryRow(h, point));
+            while (BHistory.Count > MaxHistoryRows)
+            {
+                BHistory.RemoveAt(BHistory.Count - 1);
+            }
+        }
+
+        RefreshLateFillColumns(point);
+
+        StatusBHistory = $"Connected: {_sessionTickets.Count} session closed";
+    }
+
+    private BHistoryRow BuildHistoryRow(HistoryRecord h, int point)
+    {
+        _openFills.TryGetValue(h.Ticket, out var openFill);
+        _closeFills.TryGetValue(h.Ticket, out var closeFill);
+        var displayOpenPrice = h.OpenPrice > 0 ? h.OpenPrice : (openFill?.FillPrice ?? 0);
+        return new BHistoryRow(
+            h.Ticket,
+            h.Side.ToString(),
+            h.Volume,
+            displayOpenPrice,
+            h.ClosePrice,
+            h.StopLoss,
+            h.TakeProfit,
+            h.Commission,
+            h.Profit,
+            FormatTime(h.OpenTimeMsc),
+            FormatTime(h.CloseTimeMsc),
+            h.CloseEaTimeLocal,
+            h.Symbol,
+            GapOpen:  openFill is not null ? openFill.DecideGap : null,
+            SlipOpen:  openFill is not null ? GapCalculator.ToPoints(openFill.SlippagePrice, point) : null,
+            SlipClose: closeFill is not null && h.ClosePrice > 0
+                ? GapCalculator.ToPoints(h.ClosePrice - closeFill.DecidePrice, point)
+                : null);
+    }
+
+    // Fills can be observed after the history record is first shown (FillTracker
+    // waits up to a few seconds for the lagging history map), so backfill the
+    // Gap/Slip columns onto rows that were added without them.
+    private void RefreshLateFillColumns(int point)
+    {
+        for (var i = 0; i < BHistory.Count; i++)
+        {
+            var row = BHistory[i];
+            var updated = row;
+
+            if (updated.SlipClose is null && updated.ClosePrice > 0
+                && _closeFills.TryGetValue(updated.Ticket, out var closeFill))
+            {
+                updated = updated with
+                {
+                    SlipClose = GapCalculator.ToPoints(updated.ClosePrice - closeFill.DecidePrice, point),
+                };
+            }
+
+            if (updated.GapOpen is null && _openFills.TryGetValue(updated.Ticket, out var openFill))
+            {
+                updated = updated with
+                {
+                    GapOpen = openFill.DecideGap,
+                    SlipOpen = GapCalculator.ToPoints(openFill.SlippagePrice, point),
+                    OpenPrice = updated.OpenPrice > 0 ? updated.OpenPrice : openFill.FillPrice,
+                };
+            }
+
+            if (!ReferenceEquals(updated, row))
+            {
+                BHistory[i] = updated;
+            }
         }
     }
 
