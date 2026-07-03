@@ -84,9 +84,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     // instantly re-entering the same adverse condition).
     private long _reopenBlockedUntilMs;
 
-    // Hard-SL command awaiting the EA's ack (0 = none pending).
-    private int _pendingSlCmdSeq;
-    private ulong _pendingSlTicket;
+    // Broker-side trailing hard SL: the app re-pushes the SL to the broker (via
+    // the EA) as the soft stop ratchets up, so the broker enforces it tick-by-tick.
+    private int _lastSlCmdSeq;
+    private int _lastAckedSlSeq;
+    private bool _brokerSlArmed;
+    private int? _lastPushedSoftStopPoint;
+    // Only re-push once the soft stop has tightened by at least this much (bounds
+    // how often we send PositionModify to the broker).
+    private const int BrokerSlTrailStepPt = 10;
 
     public MainViewModel()
     {
@@ -292,7 +298,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _fillTracker.Reset();
         _lastSnapshotMs = 0;
         _reopenBlockedUntilMs = 0;
-        _pendingSlCmdSeq = 0;
+        _lastSlCmdSeq = 0;
+        _lastAckedSlSeq = 0;
+        _brokerSlArmed = false;
+        _lastPushedSoftStopPoint = null;
 
         // Start = a fresh session: drop everything from the previous one and ask
         // the EA to re-baseline the history map so only new closes are exported.
@@ -490,16 +499,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             AddLog(DescribeFill(fill, config.Point));
             _csvLogger?.LogFill(fill);
 
-            // Re-anchor SL/trailing to the broker's real fill price once known,
-            // then arm the broker-side hard SL on the real ticket.
+            // Re-anchor SL/trailing to the broker's real fill price once known.
+            // The trailing broker SL is (re)pushed below, driven by the engine.
             if (!fill.IsClose && fill.ClusterId is { } cid
                 && _trailingEngine.ApplyOpenFill(cid, fill.Ticket, fill.FillPrice, config.Point))
             {
                 AddLog($"entry corrected -> {F(fill.FillPrice)} ({GapCalculator.ToPoints(fill.FillPrice, config.Point)}pt)");
-                RequestHardSl(fill, config);
             }
         }
 
+        UpdateTrailingBrokerSl(config);
         ReconcileExternalClose(bTrades, b.Symbol, nowMs, config);
         PollHardSlAck();
 
@@ -604,49 +613,79 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _openEntryPoint = null;
     }
 
-    // Broker-side hard SL: soft SL (StopLossPoint) + buffer, placed on the real
-    // ticket via the EA command map. It is the last-resort stop when the app,
-    // feed or close click fails; the soft stop still closes first normally.
-    private void RequestHardSl(FillEvent fill, StrategyConfig config)
+    // Broker-side trailing hard SL. The broker checks SL on every tick server-side,
+    // so pushing the SL down as the soft stop ratchets up catches a price gap the
+    // instant it crosses — far earlier than the 25ms app poll + click. The broker
+    // SL sits HardSlBufferPt beyond the app's soft stop, so the app still closes
+    // first on normal moves and the broker only fires on gaps that blow past.
+    private void UpdateTrailingBrokerSl(StrategyConfig config)
     {
         if (config.HardSlBufferPt <= 0)
+        {
+            return; // hard SL disabled
+        }
+
+        if (_trailingEngine.Current is not { Ticket: { } ticket } pos)
+        {
+            // Flat / fill not observed yet: reset so the next position re-arms.
+            _lastPushedSoftStopPoint = null;
+            _brokerSlArmed = false;
+            return;
+        }
+
+        if (_trailingEngine.CurrentStopLevelPoint(config) is not { } softStopPoint)
         {
             return;
         }
 
-        var distance = (config.StopLossPoint + config.HardSlBufferPt) / (double)config.Point;
-        var sl = fill.Side == DryRunSide.BuyB ? fill.FillPrice - distance : fill.FillPrice + distance;
-        var mapName = SharedMemoryMapNames.CmdFromTick(MapNameB);
-
-        if (_commandWriter.TryWriteSetSl(mapName, fill.Ticket, sl, out var seq, out var error))
+        // Only re-push once the stop tightened by a meaningful step (bounds the
+        // PositionModify rate). Stop only ratchets in the protective direction.
+        if (_lastPushedSoftStopPoint is { } last && Math.Abs(softStopPoint - last) < BrokerSlTrailStepPt)
         {
-            _pendingSlCmdSeq = seq;
-            _pendingSlTicket = fill.Ticket;
-            AddLog($"hard SL request #{fill.Ticket} sl={F(sl)} ({config.StopLossPoint}+{config.HardSlBufferPt}pt)");
+            return;
+        }
+
+        var brokerStopPoint = pos.Side == SignalSide.BuyB
+            ? softStopPoint - config.HardSlBufferPt
+            : softStopPoint + config.HardSlBufferPt;
+        var slPrice = brokerStopPoint / (double)config.Point;
+
+        if (_commandWriter.TryWriteSetSl(SharedMemoryMapNames.CmdFromTick(MapNameB), ticket, slPrice, out var seq, out var error))
+        {
+            _lastPushedSoftStopPoint = softStopPoint;
+            _lastSlCmdSeq = seq;
+            if (!_brokerSlArmed)
+            {
+                AddLog($"hard SL trailing armed #{ticket} sl={F(slPrice)} (soft stop {softStopPoint}pt − {config.HardSlBufferPt}pt buffer)");
+                _brokerSlArmed = true;
+            }
         }
         else
         {
-            AddLog($"hard SL request FAILED #{fill.Ticket}: {error}");
+            AddLog($"hard SL push failed #{ticket}: {error}");
         }
     }
 
+    // Surfaces broker rejections (e.g. AutoTrading off, SL inside the stops
+    // level) once per command; successful sets are silent to avoid log spam.
     private void PollHardSlAck()
     {
-        if (_pendingSlCmdSeq == 0)
+        if (_lastSlCmdSeq == 0 || _lastSlCmdSeq == _lastAckedSlSeq)
         {
             return;
         }
 
         var ack = _commandWriter.TryReadAck(SharedMemoryMapNames.CmdFromTick(MapNameB));
-        if (ack is not { } a || a.Seq != _pendingSlCmdSeq)
+        if (ack is not { } a || a.Seq != _lastSlCmdSeq)
         {
             return;
         }
 
-        AddLog(a.Ok
-            ? $"hard SL set on #{_pendingSlTicket}"
-            : $"hard SL FAILED on #{_pendingSlTicket} (retcode={a.Retcode}) — check AutoTrading is enabled");
-        _pendingSlCmdSeq = 0;
+        _lastAckedSlSeq = a.Seq;
+        if (!a.Ok)
+        {
+            AddLog($"hard SL rejected by broker (retcode={a.Retcode}) — check AutoTrading / broker stops level");
+        }
     }
 
     private static ulong FindSymbolTicket(TradeReadResult bTrades, string symbol)

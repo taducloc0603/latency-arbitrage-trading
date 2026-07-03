@@ -91,8 +91,14 @@ Diem mau chot: sau khi len 1040 roi quay dau, stop la **Max-80 = 960** (KHONG ph
 
 PnL khi dong (point): `BUY = Current - Entry`, `SELL = Entry - Current`.
 
-> Hard SL broker-side (`stop_loss_point + hard_sl_buffer_pt`, dat qua EA) la luoi
-> chan cuoi cung o xa hon — soft stop tren luon dong som hon hoac bang, khong xung dot.
+> **Hard SL broker-side (TRAILING).** App day SL that xuong broker (qua EA
+> `PositionModify`) va **cap nhat lien tuc khi soft-stop truot len**. Broker kiem
+> SL tren TUNG tick server-side nen chan duoc buoc nhay gia (gap) giua 2 lan app
+> poll. Muc: `broker_SL = soft_stop ∓ hard_sl_buffer_pt` (BUY tru, SELL cong) —
+> nam sau soft-stop dung `hard_sl_buffer_pt` diem, nen app van dong truoc trong
+> nhip thuong, broker chi bat cac gap vuot qua. **Giam `hard_sl_buffer_pt` de siet
+> gap sat hon** (0 = broker trung soft-stop). Chi day lai khi stop siet >= 10pt de
+> gioi han so lan modify. Yeu cau EA bat AutoTrading.
 
 ---
 

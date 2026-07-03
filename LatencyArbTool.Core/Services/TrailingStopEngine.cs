@@ -86,6 +86,21 @@ public sealed class TrailingStopEngine
         return false;
     }
 
+    // The current soft-stop level (points) for the held position: the price at
+    // which SL / trailing would close. Null when flat. Single source of truth for
+    // the broker-side trailing SL pushed by the app (no formula duplication).
+    public int? CurrentStopLevelPoint(StrategyConfig config)
+    {
+        if (Current is not { } pos)
+        {
+            return null;
+        }
+
+        return pos.Side == SignalSide.BuyB
+            ? (pos.TrailingActive ? pos.HighestPoint - config.TrailingStepPoint : pos.HighestPoint - config.StopLossPoint)
+            : (pos.TrailingActive ? pos.LowestPoint + config.TrailingStepPoint : pos.LowestPoint + config.StopLossPoint);
+    }
+
     public List<DryRunEvent> Step(double bidB, double askB, SignalSide? signal, long nowMs, StrategyConfig config)
     {
         var events = new List<DryRunEvent>();
