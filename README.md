@@ -45,7 +45,7 @@ SELL : GapSell <= -z giu lien tuc >= y ms,  va  GapSell cuoi <= -x
 
 ---
 
-## 3. Dieu kien DONG lenh — Stop-Loss + Trailing-Stop
+## 3. Dieu kien DONG lenh — Trailing Stop bam DINH (MaxPrice)
 
 Tham so: `stop_loss_point`, `trailing_start_point`, `trailing_step_point`.
 Thuan theo gia B. Quy uoc gia (theo MT5 thuc):
@@ -56,44 +56,43 @@ Current = gia dong   : BUY = B.Bid, SELL = B.Ask
 ```
 Tat ca quy ve point (`gia * point`). Xem [TrailingStopEngine.cs](LatencyArbTool.Core/Services/TrailingStopEngine.cs).
 
-### BUY
-```
-1) Stop-Loss (khi chua active):   dong neu  Current <= Entry - stop_loss_point
-2) Kich hoat trailing:            khi       Current >= Entry + trailing_start_point
-                                  -> TrailingActive = true; Highest = Current
-3) Cap nhat (khi active):         Highest = max(Highest, Current)
-                                  TrailingStopPrice = Highest - trailing_step_point
-4) Dong trailing:                 dong neu  Current <= TrailingStopPrice
-```
+> ⚠️ **BUSINESS LOGIC — KHONG tu y doi.** Stop bam vao **MaxPrice** (dinh, BUY) /
+> **MinPrice** (day, SELL) tinh **tu luc mo lenh** — KE CA khi chua kich hoat
+> trailing. Truoc khi active, stop van truot theo dinh (`MaxPrice - stop_loss_point`),
+> **KHONG** co dinh o Entry. Moi thay doi (doi moc tham chieu ve Entry, bo cap nhat
+> Max khi chua active, doi thu tu cac buoc) phai duoc **chu du an xac nhan**. Test
+> doi chung: `TrailingStopEngineTests` (`Buy_FullSequencePerSpec`,
+> `Buy_StopTrailsMaxBeforeActivation`, `Sell_StopTrailsMinBeforeActivation`).
 
-### SELL (guong)
+### Thuat toan (BUY; SELL guong voi MinPrice)
 ```
-1) Stop-Loss (khi chua active):   dong neu  Current >= Entry + stop_loss_point
-2) Kich hoat trailing:            khi       Current <= Entry - trailing_start_point
-                                  -> TrailingActive = true; Lowest = Current
-3) Cap nhat (khi active):         Lowest = min(Lowest, Current)
-                                  TrailingStopPrice = Lowest + trailing_step_point
-4) Dong trailing:                 dong neu  Current >= TrailingStopPrice
+Ngay sau khi vao lenh: MaxPrice = Entry ; TrailingActive = false
+
+Moi tick:
+  1) MaxPrice = max(MaxPrice, Current)              // LUON cap nhat, ke ca chua active
+  2) Neu Current >= Entry + trailing_start_point -> TrailingActive = true
+  3) StopPrice = TrailingActive ? MaxPrice - trailing_step_point
+                                : MaxPrice - stop_loss_point
+  4) Neu Current <= StopPrice -> dong lenh
+        reason = TrailingActive ? "trailing stop" : "stop loss"
 ```
+SELL: MinPrice = min(MinPrice, Current); active khi `Current <= Entry - trailing_start_point`;
+`StopPrice = MinPrice + (TrailingActive ? trailing_step_point : stop_loss_point)`; dong khi `Current >= StopPrice`.
 
-> Khi da active, SL khong con duoc kiem tra (trailing thay the).
-
-### Vi du (StopLoss=50, TrailingStart=200, TrailingStep=30, Entry=1000)
+### Vi du (Entry=1000, StopLoss=80, TrailingStart=50, TrailingStep=50)
 ```
 BUY:
-  Current <= 950                      -> dong (stop loss)
-  Current >= 1200                     -> active, Highest=1200, stop=1170
-  Highest 1200/1300/1450              -> stop 1170/1270/1420
-  Current <= TrailingStopPrice        -> dong (trailing stop)
-
-SELL:
-  Current >= 1050                     -> dong (stop loss)
-  Current <= 800                      -> active, Lowest=800, stop=830
-  Lowest 800/700/550                  -> stop 830/730/580
-  Current >= TrailingStopPrice        -> dong (trailing stop)
+  1000 -> 1040 -> 1030          : Max=1040, stop=960, 1030>960 -> chua dong
+  1040 -> 980 -> 960            : Max=1040, stop=960, 960<=960 -> dong (stop loss)
+  1000 -> 990 -> 995            : gia chua vuot Entry, Max=1000, stop=920 -> chua dong
+  1050 (active) -> 1120 -> 1070 : active tai 1050; Max=1120, stop=1120-50=1070 -> dong (trailing stop)
 ```
+Diem mau chot: sau khi len 1040 roi quay dau, stop la **Max-80 = 960** (KHONG phai Entry-80 = 920).
 
 PnL khi dong (point): `BUY = Current - Entry`, `SELL = Entry - Current`.
+
+> Hard SL broker-side (`stop_loss_point + hard_sl_buffer_pt`, dat qua EA) la luoi
+> chan cuoi cung o xa hon — soft stop tren luon dong som hon hoac bang, khong xung dot.
 
 ---
 

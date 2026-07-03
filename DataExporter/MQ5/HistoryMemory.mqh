@@ -29,10 +29,21 @@ private:
    int m_lastCount;
    ulong m_knownPosIds[];
    ulong m_knownEaTimes[];
+   // Session baseline (GetTickCount64 của EA). Deal đóng trước mốc này bị bỏ ->
+   // sau reset map chỉ còn deal của phiên. 0 = show tất cả (trước lần reset đầu).
+   ulong m_sessionResetTick;
 
 public:
    CHistoryMemory(string memory_name) : CSharedMemoryBase(memory_name, HISTORY_MEMORY_SIZE) {
       m_lastCount = -1;
+      m_sessionResetTick = 0;
+   }
+
+   // App bấm Start -> mốc phiên = giờ EA hiện tại; Update ngay để deal cũ biến mất.
+   void ResetSession() {
+      m_sessionResetTick = GetTickCount64();
+      m_lastCount = -1;
+      Update();
    }
 
    bool HasChanged() {
@@ -69,6 +80,11 @@ public:
          deals[count].commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
          deals[count].close_time_msc = (ulong)HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
          deals[count].close_ea_time_local = GetOrSetEaTime(pos_id);
+
+         // Bỏ deal đóng trước mốc phiên (EA lần đầu thấy trước reset). Dùng đồng
+         // hồ EA (monotonic) nên không lệ thuộc server-time/timezone.
+         if(deals[count].close_ea_time_local < m_sessionResetTick)
+            continue;
 
          // Find entry deal for open_price and open_time
          deals[count].open_price = 0;

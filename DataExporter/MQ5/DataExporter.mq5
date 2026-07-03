@@ -83,7 +83,7 @@ void OnTrade() {
 }
 
 void OnTimer() {
-   g_commands.Process();
+   g_commands.Process(g_history);
 
    ulong now = GetTickCount64();
    if(now - g_lastTradesRefreshMs >= TRADES_REFRESH_MS) {

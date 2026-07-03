@@ -9,3 +9,4 @@ TestResults/
 .env
 appsettings.local.json
 # data
+DataExporter/MQ5/*.ex5

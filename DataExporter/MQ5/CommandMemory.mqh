@@ -1,16 +1,22 @@
 // CommandMemory.mqh
-// Kênh lệnh app -> EA qua shared memory. Hiện chỉ có 1 loại lệnh: đặt SL cứng
-// (hard SL) cho một position theo ticket. App ghi ticket + sl rồi tăng cmd_seq;
-// EA thấy cmd_seq mới thì gọi PositionModify và ghi ack lại cho app đọc.
+// Kênh lệnh app -> EA qua shared memory. App ghi payload + opcode rồi tăng
+// cmd_seq; EA thấy cmd_seq mới thì xử lý theo opcode và ghi ack cho app đọc.
+//   opcode 1 = set hard SL cho position theo ticket (PositionModify)
+//   opcode 2 = reset baseline history (bắt đầu phiên mới, xoá deal cũ khỏi map)
+//
+// Phụ thuộc thứ tự include: DataExporter.mq5 include HistoryMemory.mqh TRƯỚC
+// header này nên CHistoryMemory đã có định nghĩa khi Process() được biên dịch.
 #property strict
 
 #include "SharedMemoryBase.mqh"
 #include "BinaryHelper.mqh"
 
 #define CMD_MEMORY_SIZE 64
+#define CMD_OP_SET_SL 1
+#define CMD_OP_RESET_HISTORY 2
 // Layout:
 //   0  int32  cmd_seq     (app tăng dần, 0 = chưa có lệnh)
-//   4  int32  reserved
+//   4  int32  opcode      (1 = set SL, 2 = reset history)
 //   8  ulong  ticket
 //   16 double sl_price    (0 = xóa SL)
 //   24 int32  ack_seq     (EA ghi = cmd_seq sau khi xử lý)
@@ -37,7 +43,7 @@ public:
       m_lastSeq = CBinaryHelper::UnpackInt32(buf, 0);
    }
 
-   void Process() {
+   void Process(CHistoryMemory *history) {
       if(!IsValid()) return;
 
       uchar buf[];
@@ -48,6 +54,16 @@ public:
       if(seq == 0 || seq == m_lastSeq) return;
       m_lastSeq = seq;
 
+      int opcode = CBinaryHelper::UnpackInt32(buf, 4);
+
+      if(opcode == CMD_OP_RESET_HISTORY) {
+         if(history != NULL) history.ResetSession();
+         WriteAck(seq, history != NULL, 0);
+         PrintFormat("[Cmd] reset history -> %s", history != NULL ? "OK" : "FAIL");
+         return;
+      }
+
+      // opcode CMD_OP_SET_SL (mặc định, gồm cả 0 cho tương thích ngược).
       ulong ticket = CBinaryHelper::UnpackUInt64(buf, 8);
       double sl = CBinaryHelper::UnpackDouble(buf, 16);
 
